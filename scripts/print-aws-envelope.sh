@@ -228,7 +228,7 @@ From any machine, no AWS login required — the repo is public:
     cd HomeLab-aws
     export AWS_ACCESS_KEY_ID=<item 8>
     export AWS_SECRET_ACCESS_KEY=<item 8>
-    export AWS_REGION=us-west-2
+    export AWS_REGION=us-east-1
     make eks-down
 
 Then work the lockout. That takes days; this takes fifteen minutes.

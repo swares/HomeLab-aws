@@ -28,7 +28,7 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 TOFU_DIR="${REPO_DIR}/tofu"
 CLUSTER_NAME="${CLUSTER_NAME:-lab-sandbox}"
-REGION="${AWS_REGION:-us-west-2}"
+REGION="${AWS_REGION:-us-east-1}"
 LB_WAIT_SECONDS="${LB_WAIT_SECONDS:-300}"
 TOFU="${TOFU:-tofu}"
 

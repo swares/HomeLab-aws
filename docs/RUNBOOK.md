@@ -7,10 +7,13 @@
 The bucket cannot be created by the module that stores its state in it. Create
 it by hand, once:
 
+**Note the missing `--create-bucket-configuration`.** `us-east-1` is S3's
+default region and passing `LocationConstraint=us-east-1` fails with
+`InvalidLocationConstraint`. Every other region requires it; this one rejects
+it. Copying a create-bucket command from any other runbook will not work here.
+
 ```bash
-aws s3api create-bucket --bucket swares-lab-tofu-state \
-  --region us-west-2 \
-  --create-bucket-configuration LocationConstraint=us-west-2
+aws s3api create-bucket --bucket swares-lab-tofu-state --region us-east-1
 
 aws s3api put-bucket-versioning --bucket swares-lab-tofu-state \
   --versioning-configuration Status=Enabled

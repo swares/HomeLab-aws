@@ -22,7 +22,7 @@ Wants=network-online.target
 Type=oneshot
 User=lab
 WorkingDirectory=/opt/HomeLab-aws
-Environment=AWS_REGION=us-west-2
+Environment=AWS_REGION=us-east-1
 Environment=CLUSTER_NAME=lab-sandbox
 Environment=REPO_DIR=/opt/HomeLab-aws
 # Credentials: file at 0400, owned by the service user. Scope this IAM identity

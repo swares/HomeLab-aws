@@ -1,7 +1,17 @@
 variable "region" {
-  description = "AWS region. Pinned to us-west-2 for g4dn depth (phase 3) and Bedrock model availability."
+  description = <<-EOT
+    AWS region. us-east-1 has the broadest Bedrock model availability (phase 1)
+    and the deepest g4dn spot capacity (phase 3), which is why it is a good fit
+    here.
+
+    Trade-off worth knowing: it is also AWS's oldest and busiest region and
+    historically the most outage-prone, and it hosts the global control planes
+    for IAM, CloudFront and Route 53. For an ephemeral training sandbox that
+    does not matter. Do not infer from this choice that it is the right default
+    for anything that needs to stay up.
+  EOT
   type        = string
-  default     = "us-west-2"
+  default     = "us-east-1"
 }
 
 variable "cluster_name" {
@@ -32,9 +42,29 @@ variable "vpc_cidr" {
 }
 
 variable "azs" {
-  description = "Availability zones. Two is the EKS minimum for the control plane ENIs."
+  description = <<-EOT
+    Availability zones. Two is the EKS minimum for the control plane ENIs.
+
+    TWO us-east-1 SPECIFICS:
+
+    1. AZ NAMES ARE RANDOMISED PER ACCOUNT. Your us-east-1a is not the same
+       physical AZ as anyone else's. Names map to stable AZ IDs (use1-az1 etc.)
+       which differ per account - check with:
+         aws ec2 describe-availability-zones --region us-east-1 \
+           --query 'AvailabilityZones[].[ZoneName,ZoneId]' --output table
+
+    2. us-east-1e IS THE ONE TO AVOID. It is the oldest hardware in the region
+       and does not offer several newer instance families, including some t3a
+       and g-series types. If you widen this list, skip 1e or expect a
+       confusing InvalidParameterValue at nodegroup creation.
+
+    1a and 1b are safe defaults. An alternative is to drop this variable and
+    select AZs dynamically with an aws_availability_zones data source filtered
+    on instance-type offerings - more robust, but more moving parts than a
+    sandbox needs.
+  EOT
   type        = list(string)
-  default     = ["us-west-2a", "us-west-2b"]
+  default     = ["us-east-1a", "us-east-1b"]
 }
 
 variable "node_instance_types" {

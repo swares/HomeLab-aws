@@ -1,6 +1,6 @@
 # CLAUDE.md — operating rules for the AWS sandbox
 
-You are helping operate an **ephemeral EKS training cluster** in `us-west-2`.
+You are helping operate an **ephemeral EKS training cluster** in `us-east-1`.
 It is deliberately separate from the home lab. Read this before acting.
 
 This is not the lab. The lab's rules (`swares/HomeLab/CLAUDE.md`) do not apply

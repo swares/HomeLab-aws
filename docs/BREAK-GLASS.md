@@ -126,7 +126,7 @@ well-scoped one.
 
 | What | Value |
 |------|-------|
-| Region | `us-west-2` |
+| Region | `us-east-1` |
 | Cluster name | `lab-sandbox` |
 | State bucket | `s3://swares-lab-tofu-state`, key `eks-sandbox/terraform.tfstate` |
 | Git remote | `https://github.com/swares/HomeLab-aws.git` (public — clone needs no credential) |

@@ -4,7 +4,7 @@
 
 TOFU      ?= tofu
 TOFU_DIR   = tofu
-REGION    ?= us-west-2
+REGION    ?= us-east-1
 CLUSTER   ?= lab-sandbox
 
 help:        ## Show this help
