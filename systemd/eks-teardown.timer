@@ -1,0 +1,15 @@
+[Unit]
+Description=Nightly EKS sandbox teardown
+Documentation=https://github.com/swares/HomeLab-aws
+
+[Timer]
+# 02:00 local. Late enough that an evening session is finished, early enough
+# that a forgotten cluster costs one evening rather than one month.
+OnCalendar=*-*-* 02:00:00
+# Persistent: if the host was off at 02:00, run on next boot. A cluster left
+# running through a host outage is exactly the case this exists for.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

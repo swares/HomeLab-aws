@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------------------
+# REFERENCE COPY ONLY - do not apply this by hand.
+#
+# The live root Application is rendered by Helm as an `extraObjects` entry in
+# tofu/argocd.tf, so that it is created atomically with the Argo CD install
+# and cannot race the CRDs. This file exists so the app-of-apps shape is
+# readable without digging through HCL.
+#
+# If you edit one, edit both. They will drift otherwise, and the HCL is the
+# one that runs.
+# ---------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/swares/HomeLab-aws.git
+    targetRevision: main
+    path: gitops/apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

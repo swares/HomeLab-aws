@@ -1,0 +1,17 @@
+# OpenTofu
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+
+# Never commit
+*.pem
+*.key
+kubeconfig*
+.aws/
+teardown.env

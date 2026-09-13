@@ -1,0 +1,39 @@
+# Nightly unconditional teardown of the EKS sandbox.
+#
+# HOST: n150-2.lab.home.arpa (x86_64).
+#
+# NOT xu3-1, despite it being the obvious choice as the build agent: the Odroid
+# XU3 is an Exynos 5422 - ARMv7, 32-bit - and AWS does not publish a 32-bit ARM
+# build of CLI v2. This script needs `aws` for `eks get-token`, which the helm
+# provider shells out to during destroy, so no AWS CLI means no teardown.
+#
+# Install:
+#   sudo cp systemd/eks-teardown.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now eks-teardown.timer
+
+[Unit]
+Description=Tear down the EKS sandbox cluster (ordered)
+Documentation=https://github.com/swares/HomeLab-aws
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lab
+WorkingDirectory=/opt/HomeLab-aws
+Environment=AWS_REGION=us-west-2
+Environment=CLUSTER_NAME=lab-sandbox
+Environment=REPO_DIR=/opt/HomeLab-aws
+# Credentials: file at 0400, owned by the service user. Scope this IAM identity
+# to what teardown needs - it does NOT need the permissions used to create the
+# cluster interactively.
+EnvironmentFile=-/etc/eks-sandbox/teardown.env
+ExecStart=/opt/HomeLab-aws/scripts/eks-teardown.sh
+TimeoutStartSec=2700
+# Do not retry on failure: a half-failed destroy needs a human, and a retry
+# loop against the AWS API at 2am is worse than a clear failure.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

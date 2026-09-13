@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# VENDORED SNAPSHOT from swares/HomeLab: gitops/workloads/kyverno/policies/disallow-latest-tag.yaml
+# Upstream is authoritative. This copy is allowed to drift - the EKS sandbox is
+# a short-lived training cluster and a stale policy here costs nothing. Do NOT
+# edit this file expecting the change to reach the lab, and do not treat a
+# difference from upstream as a bug.
+# Snapshot taken 2026-09-12.
+# ---------------------------------------------------------------------------
+# Mirrors the CI OPA policy (ci/policies/no-latest-tag.rego) but enforced at
+# admission time. Operates on Pods (so it catches all workload kinds).
+# Mode: Enforce — all workloads pinned; zero PolicyExceptions in cluster.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow Latest Tag
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Images must reference a pinned, immutable tag. :latest is non-deterministic
+      and makes rollbacks impossible. Untagged images implicitly pull :latest.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kyverno, argocd]
+      validate:
+        message: "Image must include an explicit tag (e.g. image:1.2.3 — not untagged)."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+            =(initContainers):
+              - image: "*:*"
+    - name: disallow-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kyverno, argocd]
+      validate:
+        message: "Image tag ':latest' is not allowed — pin to a specific version."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+            =(initContainers):
+              - image: "!*:latest"

@@ -1,0 +1,41 @@
+# Kyverno itself (Helm chart). Wave -1: the admission controller and its CRDs
+# must exist and be ready before any ClusterPolicy is applied, or the policy
+# apply fails with "no matches for kind ClusterPolicy".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kyverno.github.io/kyverno/
+    chart: kyverno
+    targetRevision: 3.3.7
+    helm:
+      values: |
+        # Single replica across the board - sandbox, not HA.
+        admissionController:
+          replicas: 1
+        backgroundController:
+          replicas: 1
+        cleanupController:
+          replicas: 1
+        reportsController:
+          replicas: 1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Kyverno's CRDs exceed the 256KB annotation limit that kubectl's
+      # client-side apply uses to store last-applied-configuration.
+      - ServerSideApply=true

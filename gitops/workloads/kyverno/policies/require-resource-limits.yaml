@@ -1,0 +1,98 @@
+# ---------------------------------------------------------------------------
+# VENDORED SNAPSHOT from swares/HomeLab: gitops/workloads/kyverno/policies/require-resource-limits.yaml
+# Upstream is authoritative. This copy is allowed to drift - the EKS sandbox is
+# a short-lived training cluster and a stale policy here costs nothing. Do NOT
+# edit this file expecting the change to reach the lab, and do not treat a
+# difference from upstream as a bug.
+# Snapshot taken 2026-09-12.
+# ---------------------------------------------------------------------------
+# Mirrors the CI OPA policy (ci/policies/require-resources.rego).
+# Enforced at Pod admission time — catches workloads that bypass the CI gate
+# (e.g., kubectl apply direct or ArgoCD force-sync).
+# Mode: Enforce — zero violations confirmed in audit baseline.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      All containers must declare CPU and memory limits to prevent resource
+      exhaustion on shared nodes. Requests are also required so the scheduler
+      can make informed placement decisions.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-limits
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              # kube-system, kyverno, argocd: system controllers — no upstream resource limits.
+              # default: argocd control-plane pods live here in this lab.
+              # cert-manager, external-secrets, monitoring: upstream Helm charts without
+              # resource limits in their default values; not worth forking every chart.
+              namespaces:
+                - kube-system
+                - kyverno
+                - argocd
+                - default
+                - cert-manager
+                - external-secrets
+                - monitoring
+      validate:
+        message: "Container must specify resources.limits.cpu and resources.limits.memory."
+        pattern:
+          spec:
+            # ---- initContainers — BACKLOG §4.10, added 2026-09-05 ----------------
+            # This pattern validated `containers` only. Kubernetes keeps initContainers
+            # in a SEPARATE list, so they were never examined — an enforced policy with
+            # a hole in it, and something was already through: home-assistant's
+            # `seed-config` ran on busybox with no resources block at all while the main
+            # container beside it had limits. Enforce mode made that worse, not better:
+            # it reads as coverage.
+            #
+            # `=()` IS THE EQUALITY ANCHOR AND IT IS LOAD-BEARING. It means "if this key
+            # exists, validate it". Written as a plain `initContainers:` key, the
+            # pattern would require the field to be PRESENT, and every pod in every
+            # non-excluded namespace without an initContainer — which is nearly all of
+            # them — would fail admission. In Enforce mode that is a cluster-wide outage
+            # from a policy edit. Do not remove the parentheses.
+            #
+            # ORDERING, if this is ever re-derived: the offending workload must be fixed
+            # and rolled out BEFORE this tightens. kyverno-policies and home-assistant
+            # are separate Argo Applications with no controllable sync order, so a
+            # single PR risks the policy landing while a pod is recreated from the old
+            # spec. Done as two PRs on 2026-09-05 (#564, then this), with the new pod
+            # confirmed running on the fixed template in between.
+            #
+            # SWEPT BEFORE TIGHTENING, against live pods rather than the repo, because
+            # Helm-rendered pods have no manifest in git:
+            #   kubectl get pods -A -o json | jq '... .spec.initContainers[] ...'
+            #   filtering for missing cpu+memory limits in non-excluded namespaces
+            # Exactly one hit — home-assistant/seed-config. If that had returned more,
+            # each would have needed fixing first.
+            #
+            # ephemeralContainers DELIBERATELY NOT COVERED. It is a real bypass, but
+            # validating it blocks `kubectl debug` on a running pod unless limits are
+            # passed by hand — a bad trade during an incident, in a lab where that is
+            # the debugging tool of last resort. Recorded as a known, accepted gap
+            # rather than an oversight.
+            =(initContainers):
+              - name: "*"
+                resources:
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
+            containers:
+              - name: "*"
+                resources:
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"

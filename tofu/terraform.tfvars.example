@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars and fill. terraform.tfvars is gitignored.
+
+budget_email = "you@example.com"
+
+# Only needed if the identity running the nightly teardown on n150-2 differs
+# from the identity that runs `tofu apply` interactively. The apply identity
+# already gets cluster-admin via bootstrap_cluster_creator_admin_permissions.
+# extra_admin_principal_arns = ["arn:aws:iam::111111111111:user/lab-teardown"]

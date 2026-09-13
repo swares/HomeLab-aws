@@ -1,0 +1,38 @@
+# The three ClusterPolicies, vendored from swares/HomeLab. Wave 0: after the
+# admission controller is up (wave -1).
+#
+# DIVERGENCE FROM LAB, KNOWN AND ACCEPTED: these run in Enforce mode with the
+# same namespace exclusions as upstream (kube-system, kyverno, argocd, plus
+# default/cert-manager/external-secrets/monitoring for require-resource-limits).
+# On EKS that covers the VPC CNI, kube-proxy and CoreDNS addons, which all run
+# in kube-system and would otherwise fail disallow-privileged and
+# require-resource-limits.
+#
+# WHEN PHASE 3 LANDS: Karpenter installs into its own `karpenter` namespace and
+# the NVIDIA device plugin runs privileged. Both will need either resource
+# limits in their values or an explicit exclusion. Expect the first Karpenter
+# sync to fail admission - that is the policy working, not a bug.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/swares/HomeLab-aws.git
+    targetRevision: main
+    path: gitops/workloads/kyverno/policies
+    directory:
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

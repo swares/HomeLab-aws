@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# VENDORED SNAPSHOT from swares/HomeLab: gitops/workloads/kyverno/policies/disallow-privileged.yaml
+# Upstream is authoritative. This copy is allowed to drift - the EKS sandbox is
+# a short-lived training cluster and a stale policy here costs nothing. Do NOT
+# edit this file expecting the change to reach the lab, and do not treat a
+# difference from upstream as a bug.
+# Snapshot taken 2026-09-12.
+# ---------------------------------------------------------------------------
+# Mirrors the CI OPA policy (ci/policies/no-privileged.rego).
+# Privileged containers share the host kernel and can escalate to node root.
+# Mode: Enforce — zero violations confirmed in audit baseline.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow Privileged Containers
+    policies.kyverno.io/category: Pod Security Standards (Baseline)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Privileged containers share the host kernel namespaces and can escalate
+      to root on the node. Use specific Linux capabilities instead.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: disallow-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kyverno, argocd]
+      validate:
+        message: "Privileged containers are not allowed — use specific capabilities instead."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.[containers, initContainers][].securityContext.privileged }}"
+                operator: AnyIn
+                value:
+                  - true
