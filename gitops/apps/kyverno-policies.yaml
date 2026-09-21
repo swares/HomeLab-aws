@@ -27,8 +27,9 @@ spec:
     repoURL: https://github.com/swares/HomeLab-aws.git
     targetRevision: main
     path: gitops/workloads/kyverno/policies
-    directory:
-      recurse: false
+    # No `directory: recurse: false` - false is the default, Argo strips
+    # default-valued fields from the live Application, and root then saw this
+    # child as OutOfSync forever (found 2026-09-21). Only set it to true.
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno

@@ -31,6 +31,18 @@ spec:
           replicas: 1
         reportsController:
           replicas: 1
+        # NOT COSMETIC - removing either map brings back perpetual OutOfSync.
+        # The kyverno-api subchart (0.0.1-alpha.4) renders CRD metadata with
+        # `toYaml .Values.labels`, and toYaml of an empty map is `{}`. So with
+        # its defaults every policies.kyverno.io CRD is rendered with
+        # `labels: {}` and `annotations: {}`; the API server drops empty maps,
+        # and Argo reported all 11 CRDs OutOfSync forever (found 2026-09-21).
+        # Any non-empty value fixes it. These two also say something true.
+        kyverno-api:
+          labels:
+            app.kubernetes.io/part-of: kyverno
+          annotations:
+            argocd.argoproj.io/sync-options: ServerSideApply=true
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
