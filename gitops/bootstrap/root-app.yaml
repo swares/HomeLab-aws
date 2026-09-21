@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
 # REFERENCE COPY ONLY - do not apply this by hand.
 #
-# The live root Application is rendered by Helm as an `extraObjects` entry in
-# tofu/argocd.tf, so that it is created atomically with the Argo CD install
-# and cannot race the CRDs. This file exists so the app-of-apps shape is
-# readable without digging through HCL.
+# The live root Application is rendered by the `argocd-apps` Helm release in
+# tofu/argocd.tf, installed only after the argo-cd release has created the
+# Application CRD. This file exists so the app-of-apps shape is readable
+# without digging through HCL.
 #
 # If you edit one, edit both. They will drift otherwise, and the HCL is the
 # one that runs.

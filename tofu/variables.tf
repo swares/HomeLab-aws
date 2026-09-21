@@ -133,6 +133,16 @@ variable "argocd_chart_version" {
   default     = "10.9.2"
 }
 
+variable "argocd_apps_chart_version" {
+  description = <<-EOT
+    argocd-apps Helm chart version. This chart only renders Application and
+    AppProject objects - here, the app-of-apps root. See tofu/argocd.tf for why
+    the root cannot live in the argo-cd release itself.
+  EOT
+  type        = string
+  default     = "2.0.5"
+}
+
 variable "budget_limit_usd" {
   description = "Monthly budget. Alarms are the backstop for the forgotten-cluster failure mode; the nightly teardown timer is the primary control."
   type        = string
