@@ -99,6 +99,26 @@ Expect the first Karpenter sync in phase 3 to fail admission (its namespace is
 not excluded and the NVIDIA device plugin runs privileged). That is the policy
 working.
 
+## Version pins move together
+
+Three pins are coupled, and bumping one alone is how this goes wrong:
+
+| Pin | Where | Constrained by |
+|---|---|---|
+| `cluster_version` | `tofu/variables.tf` | EKS standard support **and** the Kyverno compatibility matrix |
+| Kyverno chart | `gitops/apps/kyverno.yaml` | Kubernetes version |
+| argo-cd chart | `tofu/variables.tf` | Kubernetes version |
+
+As of 2026-09-21 the ceiling is Kyverno: its matrix lists Kubernetes 1.35
+as the newest supported, even though EKS offers 1.36. Check both before
+moving `cluster_version` in either direction. Falling behind is the
+expensive failure (extended support is 6× the control-plane price);
+jumping ahead is the confusing one (an admission webhook that half-works).
+
+`tofu/.terraform.lock.hcl` is committed. After adding a provider or
+changing a constraint, run `tofu init -upgrade` and commit the lock file in
+the same change.
+
 ## Provider pinning
 
 `helm` is pinned to `~> 2.17` on purpose. Version 3.0 changed the provider
