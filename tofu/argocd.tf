@@ -41,9 +41,11 @@ resource "helm_release" "argocd" {
       service   = { type = "ClusterIP" }
       extraArgs = ["--insecure"] # TLS terminates nowhere; port-forward is local
     }
-    dex            = { enabled = false }
-    notifications  = { enabled = false }
-    applicationSet = { enabled = false }
+    dex           = { enabled = false }
+    notifications = { enabled = false }
+    # No applicationSet key: since chart 6.9.0 the ApplicationSet controller
+    # is always installed and `applicationSet.enabled` is silently ignored.
+    # It was set to false here until 2026-09-21, which read as if it worked.
 
     # The app-of-apps root, injected as a chart extraObject.
     #

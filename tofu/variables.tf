@@ -25,10 +25,21 @@ variable "cluster_version" {
     Kubernetes minor version. Keep this INSIDE standard support. Once a version
     falls into extended support the control plane goes from $0.10/hr to $0.60/hr
     - $438/mo instead of $73/mo for a cluster you forgot about. Check the EKS
-    version calendar before pinning.
+    version calendar before pinning:
+      aws eks describe-cluster-versions --region us-east-1 \
+        --query 'clusterVersions[].[clusterVersion,versionStatus]' --output table
+
+    1.35 (standard support until 2027-03-27) rather than 1.36, deliberately:
+    the CEILING IS KYVERNO, NOT EKS. Kyverno's published compatibility matrix
+    tops out at Kubernetes 1.35 as of 2026-09-21. Before bumping this, confirm
+    the pinned Kyverno release lists the new version.
+
+    History: this defaulted to 1.33 until 2026-09-21. 1.33 left standard
+    support on 2026-07-29, so the first apply would have billed the extended
+    rate from minute one. Caught before any cluster was created.
   EOT
   type        = string
-  default     = "1.33"
+  default     = "1.35"
 }
 
 variable "vpc_cidr" {
@@ -107,9 +118,19 @@ variable "gitops_revision" {
 }
 
 variable "argocd_chart_version" {
-  description = "argo-cd Helm chart version (chart version, not appVersion). Pinned - Kyverno's disallow-latest-tag would reject an unpinned image anyway."
+  description = <<-EOT
+    argo-cd Helm chart version (chart version, not appVersion). Pinned -
+    Kyverno's disallow-latest-tag would reject an unpinned image anyway.
+
+    10.9.2 ships Argo CD v3.5.3. Crossed three chart majors from 7.7.11:
+      8.0  Argo CD 3.0
+      9.0  configs.params removed from values.yaml (still overridable; unused here)
+      10.0 global.networkPolicy.create defaults to true. No effect on EKS
+           unless the VPC CNI network-policy agent is enabled, and
+           port-forward is unaffected either way.
+  EOT
   type        = string
-  default     = "7.7.11"
+  default     = "10.9.2"
 }
 
 variable "budget_limit_usd" {

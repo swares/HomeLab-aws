@@ -1,6 +1,8 @@
 # OpenTofu
 .terraform/
-.terraform.lock.hcl
+# .terraform.lock.hcl is deliberately NOT ignored. It pins the exact provider
+# builds so the workstation and the n150-2 teardown timer cannot resolve to
+# different providers. It was ignored here until 2026-09-21; that was a mistake.
 *.tfstate
 *.tfstate.*
 crash.log

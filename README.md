@@ -39,7 +39,7 @@ one `tofu destroy` leaves no trace on either side.
 | `gitops/bootstrap/` | Reference copy of the root Application (the live one is in `tofu/argocd.tf`) |
 | `scripts/` | `eks-teardown.sh` — ordered teardown |
 | `systemd/` | Nightly teardown timer (runs on `n150-2`) |
-| `docs/BREAK-GLASS.md` | AWS lockout envelope — fill by hand, store off-site |
+| `docs/BREAK-GLASS.md` | AWS lockout envelope — prompted, printed, stored off-site |
 | `CLAUDE.md` | Operating rules — read before touching anything |
 
 ## Quickstart
