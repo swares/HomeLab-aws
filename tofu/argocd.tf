@@ -46,41 +46,6 @@ resource "helm_release" "argocd" {
     # No applicationSet key: since chart 6.9.0 the ApplicationSet controller
     # is always installed and `applicationSet.enabled` is silently ignored.
     # It was set to false here until 2026-09-21, which read as if it worked.
-
-    # The app-of-apps root, injected as a chart extraObject.
-    #
-    # Why not a kubernetes_manifest resource: that provider validates against
-    # the CRD at PLAN time, and the Application CRD does not exist until this
-    # release is installed. Classic chicken-and-egg; extraObjects sidesteps it
-    # because Helm renders it as part of the same release.
-    extraObjects = [
-      {
-        apiVersion = "argoproj.io/v1alpha1"
-        kind       = "Application"
-        metadata = {
-          name       = "root"
-          namespace  = "argocd"
-          finalizers = ["resources-finalizer.argocd.argoproj.io"]
-        }
-        spec = {
-          project = "default"
-          source = {
-            repoURL        = var.gitops_repo_url
-            targetRevision = var.gitops_revision
-            path           = "gitops/apps"
-            directory      = { recurse = true }
-          }
-          destination = {
-            server    = "https://kubernetes.default.svc"
-            namespace = "argocd"
-          }
-          syncPolicy = {
-            automated   = { prune = true, selfHeal = true }
-            syncOptions = ["CreateNamespace=true"]
-          }
-        }
-      }
-    ]
   })]
 
   depends_on = [
@@ -88,4 +53,59 @@ resource "helm_release" "argocd" {
     aws_eks_addon.coredns,
     aws_eks_addon.vpc_cni,
   ]
+}
+
+# ---------------------------------------------------------------------------
+# The app-of-apps root, as a SECOND Helm release (the argocd-apps chart).
+#
+# It cannot live in the argo-cd release above. Helm validates every object in
+# a release against the cluster's API before installing any of them, and the
+# Application CRD ships in that same release - so on a fresh cluster Helm
+# fails with "no matches for kind Application ... ensure CRDs are installed
+# first". Until 2026-09-21 the root was an `extraObjects` entry with a comment
+# claiming it avoided exactly this; the first real apply proved otherwise.
+#
+# A kubernetes_manifest resource does not work either: that provider checks
+# the CRD at PLAN time, before this cluster exists. A separate release that
+# depends_on the first is the standard pattern, and it is what argoproj ships
+# the argocd-apps chart for.
+#
+# Destroy order is the reverse: this release goes first, and the Application's
+# finalizer cascades to everything Argo deployed. scripts/eks-teardown.sh
+# deletes Applications before `tofu destroy` anyway, so this is belt and braces.
+# ---------------------------------------------------------------------------
+
+resource "helm_release" "argocd_root" {
+  name      = "argocd-root"
+  namespace = "argocd"
+
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argocd-apps"
+  version    = var.argocd_apps_chart_version
+
+  values = [yamlencode({
+    applications = {
+      root = {
+        namespace  = "argocd"
+        finalizers = ["resources-finalizer.argocd.argoproj.io"]
+        project    = "default"
+        source = {
+          repoURL        = var.gitops_repo_url
+          targetRevision = var.gitops_revision
+          path           = "gitops/apps"
+          directory      = { recurse = true }
+        }
+        destination = {
+          server    = "https://kubernetes.default.svc"
+          namespace = "argocd"
+        }
+        syncPolicy = {
+          automated   = { prune = true, selfHeal = true }
+          syncOptions = ["CreateNamespace=true"]
+        }
+      }
+    }
+  })]
+
+  depends_on = [helm_release.argocd]
 }

@@ -131,6 +131,6 @@ edit, not a version bump.
 - Edit HCL or `gitops/`, open a PR. Argo reconciles `gitops/` with `selfHeal`
   and `prune` on.
 - Infrastructure changes need `make plan` reviewed before `make eks-up`.
-- The root `Application` exists twice: rendered as a Helm `extraObjects` entry
+- The root `Application` exists twice: rendered by the `argocd-apps` Helm release
   in `tofu/argocd.tf` (the live one) and as a reference copy in
   `gitops/bootstrap/root-app.yaml`. If you edit one, edit both.
