@@ -74,6 +74,25 @@ CUPS spool purged **after** the queue drains rather than before. Install
 TOTP code, which is the only way to catch a transcription error before the
 lockout rather than during it.
 
+## The teardown identity is scoped, and its access has an ordering rule
+
+The 02:00 timer runs as the `lab-teardown` IAM user
+(`tofu-account/teardown-user.tf`). Its policy can refresh and delete what
+`tofu/` creates and nothing else.
+
+- **Adding a resource type to `tofu/` means extending that policy in the same
+  PR.** Otherwise the first sign is a 02:00 `AccessDenied`, with the cluster
+  still running.
+- **Never create its access key in Tofu.** `aws_iam_access_key` would put the
+  secret in S3 state. It is created by hand (RUNBOOK "Teardown timer").
+- **Never give the timer an admin key.** The same key is envelope item 8, on
+  paper and usable from anywhere.
+- **`helm_release.argocd` must `depends_on` the teardown access policy
+  association.** Destroy runs in reverse dependency order; that edge is what
+  keeps lab-teardown's Kubernetes access alive until both Helm releases are
+  uninstalled. Remove it and tofu may delete the access entry in parallel,
+  failing the uninstall `Unauthorized` halfway through a nightly run.
+
 ## Teardown is ordered, and the order is load-bearing
 
 **Never run `tofu destroy` directly.** Use `make eks-down`.

@@ -115,12 +115,17 @@ This one has a narrower job than the rest: from any machine with network access,
 destroy whatever is running. It is not a recovery credential, it is a *billing
 kill switch*.
 
-It is already on `n150-2` at `/etc/eks-sandbox/teardown.env`. It is in the
-envelope because the scenario is "the lab is also unavailable."
+It belongs to the `lab-teardown` IAM user
+(`tofu-account/teardown-user.tf`) and is already on `n150-2` at
+`/etc/eks-sandbox/teardown.env`. It is in the envelope because the scenario is
+"the lab is also unavailable."
 
-Scope it to teardown. It does not need the permissions you use to create the
-cluster interactively, and an over-scoped key on paper is worse than a
-well-scoped one.
+It is scoped to teardown and nothing else: it can refresh and delete the
+sandbox's resources, and every `make eks-up` grants it cluster access through an
+EKS access entry, so `make eks-down` works with this key alone from a clean
+machine. It cannot create anything, touch the budget, or read the account
+state. That scope is what makes it acceptable on paper. **Never** put an admin
+key in this slot; `install-teardown-timer.sh` refuses one.
 
 ## Reference values — not secret, but needed under stress
 

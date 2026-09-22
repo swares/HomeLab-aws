@@ -38,7 +38,7 @@ one `tofu destroy` leaves no trace on either side.
 | `gitops/apps/` | App-of-apps children (Argo `Application` objects) |
 | `gitops/workloads/` | Manifests the Applications point at |
 | `gitops/bootstrap/` | Reference copy of the root Application (the live one is in `tofu/argocd.tf`) |
-| `scripts/` | `eks-teardown.sh` — ordered teardown |
+| `scripts/` | `eks-teardown.sh` (ordered teardown), `install-teardown-timer.sh` (sets up the 02:00 timer on n150-2), `print-aws-envelope.sh` |
 | `systemd/` | Nightly teardown timer (runs on `n150-2`) |
 | `docs/BREAK-GLASS.md` | AWS lockout envelope — prompted, printed, stored off-site |
 | `CLAUDE.md` | Operating rules — read before touching anything |

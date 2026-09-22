@@ -1,12 +1,13 @@
 [Unit]
 Description=Nightly EKS sandbox teardown
-Documentation=https://github.com/swares/HomeLab-aws
+Documentation=https://github.com/swares/HomeLab-aws/blob/main/docs/RUNBOOK.md
 
 [Timer]
-# 02:00 local. Late enough that an evening session is finished, early enough
-# that a forgotten cluster costs one evening rather than one month.
-OnCalendar=*-*-* 02:00:00
-# Persistent: if the host was off at 02:00, run on next boot. A cluster left
+# 02:00 Denver time, stated explicitly rather than trusting the host's zone.
+# Late enough that an evening session is finished, early enough that a
+# forgotten cluster costs one evening rather than one month.
+OnCalendar=*-*-* 02:00:00 America/Denver
+# Persistent: if n150-2 was off at 02:00, run at next boot. A cluster left
 # running through a host outage is exactly the case this exists for.
 Persistent=true
 RandomizedDelaySec=300
