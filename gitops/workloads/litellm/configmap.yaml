@@ -1,0 +1,31 @@
+# LiteLLM routing config. One model, one route.
+#
+# `model_name` is what clients ask for (OpenAI-style). `model` is the Bedrock
+# target: the US INFERENCE PROFILE ID, not the bare model ID - in us-east-1
+# bedrock-runtime rejects the bare ID for on-demand calls.
+#
+# No credentials here, and none anywhere: boto3 inside LiteLLM finds
+# AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE (injected by EKS because of the
+# ServiceAccount's role annotation) and exchanges the pod's token for
+# temporary credentials. That is IRSA; see tofu/litellm.tf.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: litellm
+data:
+  config.yaml: |
+    model_list:
+      - model_name: claude-haiku
+        litellm_params:
+          model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+          aws_region_name: us-east-1
+
+    litellm_settings:
+      # Never send prompt/response bodies to any callback or log sink.
+      turn_off_message_logging: true
+      drop_params: true
+
+    # No general_settings.master_key yet, deliberately: the Service is
+    # ClusterIP and reachable only by port-forward. Phase 2 adds ingress and
+    # a master key TOGETHER - never one without the other.

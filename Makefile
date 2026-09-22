@@ -1,6 +1,6 @@
 # Convenience targets for the EKS sandbox. Mirrors the conventions in
 # swares/HomeLab: `make help` greps the ## comments.
-.PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui cost fmt validate \
+.PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui litellm-smoke irsa-check cost fmt validate \
         account-init account-plan account-apply
 
 TOFU      ?= tofu
@@ -52,6 +52,21 @@ argocd-ui:   ## Print the admin password and start a port-forward on :8080
 		-o jsonpath='{.data.password}' | base64 -d; echo
 	@echo "user: admin   ->  http://localhost:8080"
 	KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n argocd port-forward svc/argocd-server 8080:443
+
+litellm-smoke: ## Phase 1: one real Claude call through LiteLLM (port-forward, curl, clean up)
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm rollout status deploy/litellm --timeout=180s
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm port-forward svc/litellm 4000:4000 >/dev/null 2>&1 & \
+	  pf=$$!; trap "kill $$pf 2>/dev/null" EXIT; sleep 3; \
+	  curl -fsS http://localhost:4000/v1/chat/completions \
+	    -H 'Content-Type: application/json' \
+	    -d '{"model":"claude-haiku","max_tokens":40,"messages":[{"role":"user","content":"Reply with exactly: IRSA works"}]}' \
+	  | python3 -c 'import json,sys; r=json.load(sys.stdin); print("model:", r["model"]); print("reply:", r["choices"][0]["message"]["content"])'
+
+irsa-check:  ## Phase 1: prove the pod has web-identity creds and NO static keys
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm exec deploy/litellm -- \
+	  sh -c 'env | grep -E "^AWS_(ROLE_ARN|WEB_IDENTITY_TOKEN_FILE)=" | sed "s/[0-9]\{12\}/<acct>/"; \
+	         if env | grep -qE "^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)="; then echo "FAIL: static keys present"; exit 1; \
+	         else echo "OK: no static AWS keys in the pod"; fi'
 
 cost:        ## Month-to-date spend
 	@aws ce get-cost-and-usage \

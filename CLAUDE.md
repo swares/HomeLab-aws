@@ -93,6 +93,29 @@ The 02:00 timer runs as the `lab-teardown` IAM user
   uninstalled. Remove it and tofu may delete the access entry in parallel,
   failing the uninstall `Unauthorized` halfway through a nightly run.
 
+## Workload identity: Tofu owns it, git owns the workload
+
+Phase 1 established the pattern for any pod that calls AWS:
+
+- **IAM role, namespace and ServiceAccount are Tofu** (`tofu/litellm.tf`). The
+  SA's `eks.amazonaws.com/role-arn` annotation contains the account ID and the
+  repo is public, so it never goes in git.
+- **Everything else is GitOps.** The Argo Application for such a workload has
+  no `CreateNamespace`, because Tofu owns the namespace.
+- **Trust policies pin `sub` and `aud` with `StringEquals`.** Never
+  `StringLike` on `sub`: that lets any ServiceAccount in the cluster assume
+  the role.
+- **Kubernetes resources created by Tofu must `depends_on` the teardown access
+  policy association**, the same rule as the Helm releases, or the nightly
+  destroy loses cluster access halfway.
+- **Role names start `lab-sandbox-`,** which is what the teardown policy is
+  scoped to.
+- **Bedrock in us-east-1 is called through inference profiles** (`us.…`), not
+  bare model IDs. The IAM policy must allow the profile *and* the model in
+  every region the profile routes to.
+- **No LiteLLM master key and no ingress, or both.** Never an ingress without
+  the key.
+
 ## Teardown is ordered, and the order is load-bearing
 
 **Never run `tofu destroy` directly.** Use `make eks-down`.
@@ -155,6 +178,10 @@ changing a constraint, run `tofu init -upgrade` and commit the lock file in
 the same change.
 
 ## Provider pinning
+
+`kubernetes` is used for **v1 resources only** (`kubernetes_namespace_v1`,
+`kubernetes_service_account_v1`). Never `kubernetes_manifest`: it needs a live
+cluster at plan time, and this cluster never exists at plan time.
 
 `helm` is pinned to `~> 2.17` on purpose. Version 3.0 changed the provider
 configuration syntax — the `kubernetes` block became an attribute and `set`

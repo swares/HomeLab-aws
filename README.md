@@ -75,9 +75,13 @@ stop it.
 | Argo CD | `argocd` | Installed by Tofu, not by itself. Dies with the cluster. |
 | Kyverno | `kyverno` | Helm chart, sync-wave -1 |
 | Kyverno policies | `kyverno` | Three ClusterPolicies vendored from HomeLab, sync-wave 0 |
+| LiteLLM | `litellm` | Phase 1. OpenAI-compatible gateway to Claude Haiku 4.5 on Bedrock, sync-wave 1. **No AWS keys**: the pod gets credentials through IRSA. ClusterIP only |
 
-That is the whole of phase 0 on purpose. If the create/destroy loop is not
-boring and reliable, everything after it is painful.
+Ownership is split on purpose. Argo deploys the LiteLLM workload from git.
+Tofu owns its **identity**: the IAM role, the namespace, and the ServiceAccount
+whose annotation holds the role ARN (`tofu/litellm.tf`). That keeps the account
+ID out of this public repo, and means the role and the only thing that can use
+it are created and destroyed together.
 
 ## Cost
 
@@ -87,7 +91,8 @@ boring and reliable, everything after it is painful.
 | 2× t3.medium spot | ~$0.0125/hr ea | ~$0.20 |
 | gp3 volumes, 30 GB ×2 | ~$0.08/GB-mo | ~$0.05 |
 | NAT Gateway | **not created** | $0.00 |
-| **Total** | | **~$1.05** |
+| Bedrock, Claude Haiku 4.5 | per token | cents for a session of testing |
+| **Total** | | **~$1.05** plus Bedrock usage |
 
 Left running for a month, the same cluster is roughly **$85**. If the
 Kubernetes version slips into extended support, the control plane alone goes
@@ -97,8 +102,8 @@ from $73/mo to about $438/mo. Both numbers are why the nightly timer exists.
 
 | Phase | Content | Status |
 |---|---|---|
-| 0 | Create/destroy loop, self-bootstrapping Argo, Kyverno baseline | this repo |
-| 1 | LiteLLM → Bedrock via **IRSA** (the core EKS lesson) | not started |
+| 0 | Create/destroy loop, self-bootstrapping Argo, Kyverno baseline, nightly teardown timer | done (break-glass Drill A outstanding) |
+| 1 | LiteLLM → Bedrock via **IRSA** (the core EKS lesson) | in progress |
 | 2 | m5stack-adapter in front of it; ALB controller, ingress, teardown ordering | not started |
 | 3 | Karpenter + GPU spot nodes; Whisper large-v3 batch | not started |
 

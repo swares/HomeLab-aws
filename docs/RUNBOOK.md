@@ -156,7 +156,8 @@ journalctl -u eks-teardown.service -f         # expect "Teardown complete."
 ```
 
 Then the orphan sweep below, and `make eks-status` should say nothing is
-billing. Also run it once with no cluster up; it should exit 0.
+billing. Also `rm -f ~/.kube/eks-sandbox`: only `make eks-down` removes that
+file. The timer runs as a different user, so a timer teardown leaves it behind. Also run it once with no cluster up; it should exit 0.
 
 ### When a nightly run fails
 
@@ -173,6 +174,52 @@ journalctl -u eks-teardown.service --since yesterday
   as yourself.
 - **Anything else.** Run `make eks-down` as yourself first to stop the billing,
   then diagnose. The cluster costs money while you debug the timer.
+
+## Phase 1: LiteLLM → Bedrock via IRSA
+
+### One-time prerequisites (account level, do before the first phase-1 `eks-up`)
+
+1. **Anthropic use-case form.** Bedrock enables serverless models by default
+   (the old Model Access page was retired in October 2025), but Anthropic
+   models still need a one-time use-case form. In the Bedrock console, open
+   Claude Haiku 4.5 in the model catalog and submit it when prompted.
+2. **Make the first call yourself, as admin.** The account's first Anthropic
+   call creates an AWS Marketplace subscription and needs
+   `aws-marketplace:Subscribe`, which the pod deliberately does not have:
+   ```bash
+   aws bedrock-runtime converse --region us-east-1 \
+     --model-id us.anthropic.claude-haiku-4-5-20251001-v1:0 \
+     --messages '[{"role":"user","content":[{"text":"hi"}]}]' \
+     --query 'output.message.content[0].text' --output text
+   ```
+   Any reply means the account is ready. `AccessDeniedException` mentioning
+   the use-case form means step 1 hasn't gone through yet.
+3. **Extend the teardown policy first:** `make account-apply`. The phase-1 role
+   has an inline policy, and without `iam:DeleteRolePolicy` the 02:00 timer
+   fails `AccessDenied` on it with the cluster still up.
+
+### Verify
+
+```bash
+make eks-up
+eval "$(make -s eks-env)"
+kubectl -n argocd get applications     # litellm Synced/Healthy, alongside the others
+make irsa-check                        # AWS_ROLE_ARN + token file present, NO static keys
+make litellm-smoke                     # a real Claude reply through LiteLLM
+```
+
+`irsa-check` is the lesson made visible: the pod holds a role ARN and a path to
+a Kubernetes-issued token, and no AWS key of any kind.
+
+### When it fails
+
+| Symptom | Cause |
+|---|---|
+| `litellm` pod `ImagePullBackOff` | Image tag doesn't exist. Check the current stable tag and update `deployment.yaml` |
+| Pod never starts: `serviceaccount "litellm" not found` | Tofu hasn't created the SA; check the `eks-up` output for `kubernetes_service_account_v1.litellm` |
+| Smoke test: `AccessDeniedException ... not authorized to perform: sts:AssumeRoleWithWebIdentity` | Trust policy `sub`/`aud` doesn't match the SA, or the OIDC provider is missing. `tofu/litellm.tf` |
+| Smoke test: `AccessDeniedException ... bedrock:InvokeModel` on a **foundation-model ARN in another region** | The inference profile routed the call to a region the policy doesn't list. Add it to `bedrock_profile_dest_regns` |
+| Smoke test: mentions the use-case form or Marketplace | Prerequisite 1 or 2 hasn't been done |
 
 ## Failure recovery
 

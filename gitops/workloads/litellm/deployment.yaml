@@ -1,0 +1,64 @@
+# The ServiceAccount `litellm` is NOT in git. Tofu creates it (tofu/litellm.tf)
+# because its role-arn annotation contains the account ID and this repo is
+# public. If this Deployment ever syncs before the SA exists, pods fail with
+# "serviceaccount not found" and the ReplicaSet retries until it appears;
+# tofu orders the SA before Argo's root app, so that should not happen.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: litellm
+  labels:
+    app.kubernetes.io/name: litellm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: litellm
+      annotations:
+        # Roll the pod when the model config changes.
+        config-version: "1"
+    spec:
+      serviceAccountName: litellm
+      containers:
+        - name: litellm
+          # Pinned: Kyverno disallow-latest-tag rejects anything else.
+          # v1.101.0 = latest stable on the GitHub releases page, 2026-09-22.
+          image: ghcr.io/berriai/litellm:v1.101.0
+          args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+          ports:
+            - name: http
+              containerPort: 4000
+          env:
+            # boto3 uses this for STS; regional endpoint, not the global one.
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_STS_REGIONAL_ENDPOINTS
+              value: regional
+          volumeMounts:
+            - name: config
+              mountPath: /etc/litellm
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /health/readiness, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/liveliness, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          # Kyverno require-resource-limits: cpu AND memory limits required.
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits:   { cpu: "1",  memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
