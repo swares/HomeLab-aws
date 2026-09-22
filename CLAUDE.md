@@ -83,6 +83,10 @@ The 02:00 timer runs as the `lab-teardown` IAM user
 - **Adding a resource type to `tofu/` means extending that policy in the same
   PR.** Otherwise the first sign is a 02:00 `AccessDenied`, with the cluster
   still running.
+- **Its permissions are a MANAGED policy, attached** (`eks-sandbox-teardown`),
+  not an inline user policy. Inline user policies cap at 2048 bytes and phase 2
+  crossed it; managed allows 6144. Past that, add a second managed policy
+  rather than widening actions to wildcards to save bytes.
 - **Never create its access key in Tofu.** `aws_iam_access_key` would put the
   secret in S3 state. It is created by hand (RUNBOOK "Teardown timer").
 - **Never give the timer an admin key.** The same key is envelope item 8, on
@@ -115,6 +119,28 @@ Phase 1 established the pattern for any pod that calls AWS:
   every region the profile routes to.
 - **No LiteLLM master key and no ingress, or both.** Never an ingress without
   the key.
+- **A chart that creates its own ServiceAccount keeps it** (phase 2's
+  aws-load-balancer-controller): the role ARN is a Helm value in Tofu, still
+  never a manifest in git. Tofu only creates the SA itself when nothing else
+  will.
+
+## Nothing that identifies the home network goes in git
+
+This repo is public. The ingress ALB is reachable from the internet and its
+backends have no auth, so the allowed source CIDR matters - and it is a home
+address. It lives in `tofu/terraform.tfvars` (gitignored) as
+`alb_allowed_cidrs`; Tofu builds the `lab-sandbox-alb-ingress` security group
+from it, and the Ingress in `gitops/` references that group **by name**. Never
+put a home address in an `alb.ingress.kubernetes.io/inbound-cidrs` annotation,
+and never widen the variable to `0.0.0.0/0` - the variable validation refuses
+it on purpose.
+
+**Every Ingress that names that security group must also set
+`alb.ingress.kubernetes.io/manage-backend-security-group-rules: "true"`.**
+Naming a frontend SG turns off the controller's management of the node-side
+rules, so the ALB provisions, passes the SG check, and then returns 504 because
+nothing permits it to reach the pods. That pairing is the cost of keeping the
+CIDR out of git; the two annotations travel together.
 
 ## Teardown is ordered, and the order is load-bearing
 
@@ -130,8 +156,14 @@ cannot see, and the cleanup is manual and billable.
 The order is: delete the Kubernetes objects → **wait** for AWS to actually
 remove the load balancers → destroy. `scripts/eks-teardown.sh` does all three.
 
-Phase 0 has no Ingress, so the wait is currently a no-op. Do not remove it.
-Phase 2 makes it load-bearing.
+Phase 0 had no Ingress, so the wait was a no-op. Phase 2 makes it
+load-bearing. Do not remove it.
+
+Security groups are the second half of that problem. The controller creates
+SGs tagged `elbv2.k8s.aws/cluster`, not with this repo's tags, and a VPC
+cannot be deleted while any SG lives in it. `tofu-account/teardown-user.tf`
+grants the teardown identity deletion on SGs carrying that tag, scoped to
+`lab-sandbox`, purely as the orphan safety net.
 
 ## State lives in S3, never in Minio
 

@@ -101,6 +101,10 @@ data "aws_iam_policy_document" "teardown" {
       "ec2:DeleteVpc", "ec2:DeleteSubnet",
       "ec2:DeleteRouteTable", "ec2:DisassociateRouteTable",
       "ec2:DeleteInternetGateway", "ec2:DetachInternetGateway",
+      # Phase 2: tofu's own lab-sandbox-alb-ingress SG carries these tags.
+      # Deleting a security group means revoking its rules first.
+      "ec2:DeleteSecurityGroup",
+      "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
     ]
     resources = ["*"]
     condition {
@@ -112,6 +116,33 @@ data "aws_iam_policy_document" "teardown" {
       test     = "StringEquals"
       variable = "aws:ResourceTag/Lifecycle"
       values   = ["ephemeral"]
+    }
+  }
+
+  # --- Security groups the AWS Load Balancer Controller leaves behind -----
+  # Phase 2. Normally the controller deletes its own SGs when the Ingress
+  # goes: eks-teardown.sh removes Ingresses first and waits for the load
+  # balancers to disappear. But if the controller is already gone, or an ALB
+  # delete raced, its SGs survive - and a VPC cannot be deleted while a
+  # security group still lives in it, so the whole teardown stops with
+  # DependencyViolation and the cluster stays up, billing.
+  #
+  # These SGs carry the controller's own tag, NOT this repo's tags, so the
+  # Ec2DeleteEphemeralOnly statement above cannot reach them. Scoping on
+  # elbv2.k8s.aws/cluster = lab-sandbox keeps the grant to SGs the controller
+  # created for THIS cluster.
+  statement {
+    sid = "Ec2DeleteControllerSecurityGroups"
+    actions = [
+      "ec2:DeleteSecurityGroup",
+      "ec2:RevokeSecurityGroupIngress",
+      "ec2:RevokeSecurityGroupEgress",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/elbv2.k8s.aws/cluster"
+      values   = [local.cluster]
     }
   }
 
@@ -147,10 +178,30 @@ data "aws_iam_policy_document" "teardown" {
   }
 }
 
-resource "aws_iam_user_policy" "teardown" {
-  name   = "eks-sandbox-teardown"
-  user   = aws_iam_user.teardown.name
-  policy = data.aws_iam_policy_document.teardown.json
+# A MANAGED policy, attached, rather than an inline user policy. Inline user
+# policies cap at 2048 bytes and this one passed that on 2026-09-22 when phase
+# 2 added the security-group statements: PutUserPolicy failed with
+# "LimitExceeded: Maximum policy size of 2048 bytes exceeded". Managed policies
+# allow 6144, and the document is ~3.4 KB today.
+#
+# The cap is on the RENDERED JSON, so whitespace is not the problem and
+# reformatting will not buy room. When phase 3 pushes this past 6144, the fix
+# is a second managed policy (up to 10 can be attached), not wildcards that
+# widen what this key can reach.
+#
+# This is still the only identity whose key sits on a lab node and on paper, so
+# the scoping rules above do not change: read what destroy refreshes, delete
+# only what tofu/ creates, create nothing.
+resource "aws_iam_policy" "teardown" {
+  name        = "eks-sandbox-teardown"
+  path        = "/homelab-aws/"
+  description = "Nightly EKS sandbox teardown. Destroys lab-sandbox; creates nothing."
+  policy      = data.aws_iam_policy_document.teardown.json
+}
+
+resource "aws_iam_user_policy_attachment" "teardown" {
+  user       = aws_iam_user.teardown.name
+  policy_arn = aws_iam_policy.teardown.arn
 }
 
 output "teardown_user_arn" {

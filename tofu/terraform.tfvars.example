@@ -9,3 +9,8 @@
 #
 # Only for a THIRD identity that needs cluster-admin:
 # extra_admin_principal_arns = ["arn:aws:iam::111111111111:user/someone"]
+
+# Phase 2: who may reach the ingress ALB on port 80. YOUR address, not a
+# range, and never 0.0.0.0/0 - the backends behind it have no auth. Find it
+# with: curl -s https://checkip.amazonaws.com
+# alb_allowed_cidrs = ["203.0.113.7/32"]

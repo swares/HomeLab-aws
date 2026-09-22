@@ -118,5 +118,9 @@ resource "helm_release" "argocd_root" {
     # Argo must not deploy gitops/workloads/litellm before tofu has created
     # the IRSA ServiceAccount it references.
     kubernetes_service_account_v1.litellm,
+    # Phase 2: an Ingress that syncs before the controller exists just sits
+    # with no ADDRESS until the controller catches up. This edge means a fresh
+    # cluster comes up with the ALB already provisioning.
+    helm_release.alb_controller,
   ]
 }

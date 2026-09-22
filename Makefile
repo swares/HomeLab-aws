@@ -1,6 +1,6 @@
 # Convenience targets for the EKS sandbox. Mirrors the conventions in
 # swares/HomeLab: `make help` greps the ## comments.
-.PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui litellm-wait litellm-smoke irsa-check cost fmt validate \
+.PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui litellm-wait litellm-smoke irsa-check alb-check cost fmt validate \
         account-init account-plan account-apply
 
 # Recipes use bash features ([[ ]]); /bin/sh on Debian is dash.
@@ -89,6 +89,14 @@ irsa-check: litellm-wait ## Phase 1: prove the pod has web-identity creds and NO
 	         else echo "FAIL: IRSA token file missing"; exit 1; fi; \
 	         if [ -e /var/run/secrets/kubernetes.io/serviceaccount/token ]; then echo "FAIL: k8s API token mounted"; exit 1; \
 	         else echo "OK: no Kubernetes API token (automount off)"; fi'
+
+alb-check:   ## Phase 2: prove the AWS Load Balancer Controller is up and holding IRSA creds
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n kube-system rollout status deploy/aws-load-balancer-controller --timeout=180s
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl get ingressclass alb -o jsonpath='{.metadata.name}{"\t"}{.spec.controller}{"\n"}'
+	@# The controller image is distroless, so there is no shell to exec into:
+	@# read the annotation the pod-identity webhook acts on instead.
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n kube-system get sa aws-load-balancer-controller \
+	  -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}{"\n"}' | sed 's/[0-9]\{12\}/<acct>/'
 
 cost:        ## Month-to-date spend
 	@aws ce get-cost-and-usage \
