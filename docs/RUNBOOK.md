@@ -294,7 +294,8 @@ kubectl expose deploy echo --port=80 --target-port=8080
 kubectl create ingress echo --class=alb --rule='/*=echo:80' \
   --annotation alb.ingress.kubernetes.io/scheme=internet-facing \
   --annotation alb.ingress.kubernetes.io/target-type=ip \
-  --annotation alb.ingress.kubernetes.io/security-groups=lab-sandbox-alb-ingress
+  --annotation alb.ingress.kubernetes.io/security-groups=lab-sandbox-alb-ingress \
+  --annotation alb.ingress.kubernetes.io/manage-backend-security-group-rules=true
 
 # 2. wait for an ADDRESS (2-3 minutes), then curl it from an allowed address
 kubectl get ingress echo -w
@@ -324,6 +325,7 @@ fix the ordering before running the timer again.
 | Controller logs `AccessDenied` on an `elasticloadbalancing:*` call | The vendored policy is older than the chart. Re-vendor from the chart's tag |
 | Ingress events: `couldn't auto-discover subnets` | Public subnets lost `kubernetes.io/role/elb=1`. Tofu sets it in `tofu/vpc.tf` |
 | ALB exists but times out from your machine | Your public IP changed, or `alb_allowed_cidrs` is empty. Update tfvars and `make eks-up` |
+| ALB answers **504** from an allowed address | `manage-backend-security-group-rules=true` is missing. Naming a frontend SG stops the controller managing the node-side rules, so nothing lets the ALB reach the pods. Seen 2026-09-22 on the first live ALB |
 | `make eks-down` stops on `DependencyViolation` for the VPC | An ALB or its SG outlived the Ingress. See "Failure recovery" |
 
 ## Failure recovery

@@ -135,6 +135,13 @@ put a home address in an `alb.ingress.kubernetes.io/inbound-cidrs` annotation,
 and never widen the variable to `0.0.0.0/0` - the variable validation refuses
 it on purpose.
 
+**Every Ingress that names that security group must also set
+`alb.ingress.kubernetes.io/manage-backend-security-group-rules: "true"`.**
+Naming a frontend SG turns off the controller's management of the node-side
+rules, so the ALB provisions, passes the SG check, and then returns 504 because
+nothing permits it to reach the pods. That pairing is the cost of keeping the
+CIDR out of git; the two annotations travel together.
+
 ## Teardown is ordered, and the order is load-bearing
 
 **Never run `tofu destroy` directly.** Use `make eks-down`.
