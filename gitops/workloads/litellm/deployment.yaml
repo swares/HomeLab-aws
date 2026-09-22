@@ -24,6 +24,11 @@ spec:
         config-version: "1"
     spec:
       serviceAccountName: litellm
+      # LiteLLM never calls the Kubernetes API, so no in-cluster API token.
+      # IRSA is unaffected: the EKS pod-identity webhook mounts its own projected
+      # token (aud=sts.amazonaws.com) at /var/run/secrets/eks.amazonaws.com/
+      # serviceaccount/token regardless of this flag. `make irsa-check` proves it.
+      automountServiceAccountToken: false
       containers:
         - name: litellm
           # Pinned: Kyverno disallow-latest-tag rejects anything else.
@@ -52,9 +57,11 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
           # Kyverno require-resource-limits: cpu AND memory limits required.
+          # ephemeral-storage bounds writable-layer use (logs, pip/prisma caches)
+          # so one pod cannot fill a t3 node's 20 GiB root volume.
           resources:
-            requests: { cpu: 100m, memory: 384Mi }
-            limits:   { cpu: "1",  memory: 1Gi }
+            requests: { cpu: 100m, memory: 384Mi, ephemeral-storage: 256Mi }
+            limits:   { cpu: "1",  memory: 1Gi,   ephemeral-storage: 1Gi }
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }

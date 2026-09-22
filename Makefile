@@ -66,7 +66,11 @@ irsa-check:  ## Phase 1: prove the pod has web-identity creds and NO static keys
 	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm exec deploy/litellm -- \
 	  sh -c 'env | grep -E "^AWS_(ROLE_ARN|WEB_IDENTITY_TOKEN_FILE)=" | sed "s/[0-9]\{12\}/<acct>/"; \
 	         if env | grep -qE "^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)="; then echo "FAIL: static keys present"; exit 1; \
-	         else echo "OK: no static AWS keys in the pod"; fi'
+	         else echo "OK: no static AWS keys in the pod"; fi; \
+	         if [ -s "$$AWS_WEB_IDENTITY_TOKEN_FILE" ]; then echo "OK: IRSA web-identity token mounted"; \
+	         else echo "FAIL: IRSA token file missing"; exit 1; fi; \
+	         if [ -e /var/run/secrets/kubernetes.io/serviceaccount/token ]; then echo "FAIL: k8s API token mounted"; exit 1; \
+	         else echo "OK: no Kubernetes API token (automount off)"; fi'
 
 cost:        ## Month-to-date spend
 	@aws ce get-cost-and-usage \
