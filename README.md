@@ -76,6 +76,11 @@ stop it.
 | Kyverno | `kyverno` | Helm chart, sync-wave -1 |
 | Kyverno policies | `kyverno` | Three ClusterPolicies vendored from HomeLab, sync-wave 0 |
 | LiteLLM | `litellm` | Phase 1. OpenAI-compatible gateway to Claude Haiku 4.5 on Bedrock, sync-wave 1. **No AWS keys**: the pod gets credentials through IRSA. ClusterIP only |
+| AWS Load Balancer Controller | `kube-system` | Phase 2. Installed by Tofu. Turns Ingress objects into real ALBs - resources Tofu has no record of, which is why teardown is ordered |
+
+The ALB's allowed source CIDR is **not in this repo**: Tofu builds the
+`lab-sandbox-alb-ingress` security group from `alb_allowed_cidrs` in the
+gitignored tfvars, and the Ingress references that group by name.
 
 Ownership is split on purpose. Argo deploys the LiteLLM workload from git.
 Tofu owns its **identity**: the IAM role, the namespace, and the ServiceAccount
@@ -92,7 +97,8 @@ it are created and destroyed together.
 | gp3 volumes, 30 GB ×2 | ~$0.08/GB-mo | ~$0.05 |
 | NAT Gateway | **not created** | $0.00 |
 | Bedrock, Claude Haiku 4.5 | per token | cents for a session of testing |
-| **Total** | | **~$1.05** plus Bedrock usage |
+| Application Load Balancer | ~$0.023/hr + LCUs | ~$0.20 (phase 2, only while an Ingress exists) |
+| **Total** | | **~$1.05**, or ~$1.25 with an ALB, plus Bedrock usage |
 
 Left running for a month, the same cluster is roughly **$85**. If the
 Kubernetes version slips into extended support, the control plane alone goes
@@ -103,8 +109,8 @@ from $73/mo to about $438/mo. Both numbers are why the nightly timer exists.
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Create/destroy loop, self-bootstrapping Argo, Kyverno baseline, nightly teardown timer | done (break-glass Drill A outstanding) |
-| 1 | LiteLLM → Bedrock via **IRSA** (the core EKS lesson) | in progress |
-| 2 | m5stack-adapter in front of it; ALB controller, ingress, teardown ordering | not started |
+| 1 | LiteLLM → Bedrock via **IRSA** (the core EKS lesson) | done - IRSA proven end to end; a live Bedrock call is blocked on an account-level restriction (RUNBOOK, Error 002) |
+| 2 | ALB controller and ingress, then the m5stack-adapter behind it, self-contained (a stub receiver stands in for the device - nothing reaches the lab) | controller in progress |
 | 3 | Karpenter + GPU spot nodes; Whisper large-v3 batch | not started |
 
 Lead-time items to start before phase 3: the **G-instance service quota**

@@ -160,3 +160,32 @@ variable "extra_admin_principal_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "alb_controller_chart_version" {
+  description = <<-EOT
+    aws-load-balancer-controller Helm chart version (chart and appVersion move
+    together; 3.5.0 = controller v3.5.0). When bumping this, re-vendor the IAM
+    policy in tofu/policies/ to the matching tag - a newer controller calling an
+    API the old policy does not allow fails at ALB creation time, not at apply.
+  EOT
+  type        = string
+  default     = "3.5.0"
+}
+
+variable "alb_allowed_cidrs" {
+  description = <<-EOT
+    Source CIDRs allowed to reach the ingress ALB on port 80. Set this in
+    terraform.tfvars (gitignored) to your own address - it does NOT belong in
+    this public repo. Empty means the SG is created with no ingress rule, so
+    the ALB answers nobody, which is the safe default for an unattended apply.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    # An open webhook on a public ALB is exactly what this phase should not
+    # teach. Widen deliberately in a branch if a demo ever needs it.
+    condition     = !contains(var.alb_allowed_cidrs, "0.0.0.0/0")
+    error_message = "Refusing 0.0.0.0/0: the sandbox ALB is reachable from the internet and its backends have no auth."
+  }
+}

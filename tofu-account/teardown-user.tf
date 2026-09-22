@@ -115,6 +115,56 @@ data "aws_iam_policy_document" "teardown" {
     }
   }
 
+  # --- Security groups the AWS Load Balancer Controller leaves behind -----
+  # Phase 2. Normally the controller deletes its own SGs when the Ingress
+  # goes: eks-teardown.sh removes Ingresses first and waits for the load
+  # balancers to disappear. But if the controller is already gone, or an ALB
+  # delete raced, its SGs survive - and a VPC cannot be deleted while a
+  # security group still lives in it, so the whole teardown stops with
+  # DependencyViolation and the cluster stays up, billing.
+  #
+  # These SGs carry the controller's own tag, NOT this repo's tags, so the
+  # Ec2DeleteEphemeralOnly statement above cannot reach them. Scoping on
+  # elbv2.k8s.aws/cluster = lab-sandbox keeps the grant to SGs the controller
+  # created for THIS cluster.
+  statement {
+    sid = "Ec2DeleteControllerSecurityGroups"
+    actions = [
+      "ec2:DeleteSecurityGroup",
+      "ec2:RevokeSecurityGroupIngress",
+      "ec2:RevokeSecurityGroupEgress",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/elbv2.k8s.aws/cluster"
+      values   = [local.cluster]
+    }
+  }
+
+  # Tofu's own ALB security group (lab-sandbox-alb-ingress) carries the repo
+  # tags, so it is destroyed under the Repo + Lifecycle conditions; deleting
+  # it means revoking its rules first.
+  statement {
+    sid = "Ec2DeleteSandboxSecurityGroup"
+    actions = [
+      "ec2:DeleteSecurityGroup",
+      "ec2:RevokeSecurityGroupIngress",
+      "ec2:RevokeSecurityGroupEgress",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Repo"
+      values   = ["swares/HomeLab-aws"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Lifecycle"
+      values   = ["ephemeral"]
+    }
+  }
+
   # --- IAM: the two sandbox roles and the cluster's OIDC provider only ----
   statement {
     sid = "IamSandboxRoles"

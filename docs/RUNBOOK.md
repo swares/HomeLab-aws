@@ -228,6 +228,94 @@ a Kubernetes-issued token, and no AWS key of any kind.
 | Smoke test: mentions the use-case form or Marketplace | Prerequisite 1 or 2 hasn't been done |
 | Any Bedrock call, from **any** identity and **any** model (including Amazon Nova), fails `ValidationException: Error 002: Access to Bedrock models is not allowed for this account` | Not IAM and not model access - the whole account is restricted. Seen 2026-09-22 after a credit card on the account expired. Fix the payment method in the Billing console; if that doesn't clear it within a day, open a free **Account and billing** support case. `aws freetier get-account-plan-state` returning `FREE` instead means the account needs upgrading to the paid plan |
 
+## Phase 2: ingress via the AWS Load Balancer Controller
+
+The controller watches Ingress objects and creates a real ALB for each one -
+**outside Tofu's state**. That is the whole risk of this phase: an ALB nobody
+deleted keeps billing and blocks the VPC delete.
+
+### One-time setup
+
+Put your own address in `tofu/terraform.tfvars` (gitignored - never in git):
+
+```bash
+curl -s https://checkip.amazonaws.com          # your current public IP
+echo 'alb_allowed_cidrs = ["A.B.C.D/32"]' >> tofu/terraform.tfvars
+make account-apply                             # teardown identity: SG deletion
+```
+
+Left empty, the security group is created with no ingress rule and the ALB
+answers nobody. A home IP changes; when a demo stops working, check this first.
+
+### What `eks-up` now creates
+
+| Resource | Owner |
+|---|---|
+| `lab-sandbox-alb-controller` role + inline policy | Tofu (`tofu/alb-controller.tf`) |
+| `aws-load-balancer-controller` Helm release, kube-system | Tofu |
+| `lab-sandbox-alb-ingress` security group | Tofu, from `alb_allowed_cidrs` |
+| The ALB, target groups, backend SG | **The controller**, at Ingress creation |
+
+The IAM policy is upstream's, vendored verbatim at
+`tofu/policies/alb-controller-v3.5.0.json`. Re-vendor it from the matching tag
+whenever `alb_controller_chart_version` moves.
+
+### Verify
+
+```bash
+make eks-up
+eval "$(make -s eks-env)"
+make alb-check       # controller Ready, `alb` IngressClass present, role ARN on the SA
+```
+
+### The teardown test, which is the point of this phase
+
+Phase 0 proved the teardown works with nothing to clean up. Do this once, with
+a real ALB live, before trusting the 02:00 timer with ingress in the cluster:
+
+```bash
+# 1. a throwaway Ingress that provisions an ALB.
+#    Namespace `default` on purpose: it is excluded from the resource-limits
+#    policy. The tag is pinned because disallow-latest-tag is NOT excluded
+#    there and rejects :latest - which is the point of having it.
+kubectl create deploy echo --image=python:3.12-slim --port=8080 \
+  -- python -m http.server 8080
+kubectl expose deploy echo --port=80 --target-port=8080
+kubectl create ingress echo --class=alb --rule='/*=echo:80' \
+  --annotation alb.ingress.kubernetes.io/scheme=internet-facing \
+  --annotation alb.ingress.kubernetes.io/target-type=ip \
+  --annotation alb.ingress.kubernetes.io/security-groups=lab-sandbox-alb-ingress
+
+# 2. wait for an ADDRESS (2-3 minutes), then curl it from an allowed address
+kubectl get ingress echo -w
+
+# 3. tear down WITH the ALB live and watch the wait step do its job
+make eks-down
+
+# 4. prove nothing survived
+aws elbv2 describe-load-balancers \
+  --query "LoadBalancers[?contains(LoadBalancerName,'k8s-')].LoadBalancerName" --output text
+aws ec2 describe-security-groups --filters Name=tag-key,Values=elbv2.k8s.aws/cluster \
+  --query 'SecurityGroups[].GroupId' --output text
+```
+
+Clean up the test objects afterwards if you are not tearing down:
+`kubectl delete ingress/echo svc/echo deploy/echo`.
+
+Both queries must come back empty. If they don't, the resources are billing:
+delete them by hand (see "Destroy fails with `DependencyViolation`" below) and
+fix the ordering before running the timer again.
+
+### When it fails
+
+| Symptom | Cause |
+|---|---|
+| Ingress never gets an `ADDRESS` | Controller not running or not permitted. `make alb-check`, then `kubectl -n kube-system logs deploy/aws-load-balancer-controller` |
+| Controller logs `AccessDenied` on an `elasticloadbalancing:*` call | The vendored policy is older than the chart. Re-vendor from the chart's tag |
+| Ingress events: `couldn't auto-discover subnets` | Public subnets lost `kubernetes.io/role/elb=1`. Tofu sets it in `tofu/vpc.tf` |
+| ALB exists but times out from your machine | Your public IP changed, or `alb_allowed_cidrs` is empty. Update tfvars and `make eks-up` |
+| `make eks-down` stops on `DependencyViolation` for the VPC | An ALB or its SG outlived the Ingress. See "Failure recovery" |
+
 ## Failure recovery
 
 ### Destroy fails with `DependencyViolation` on the VPC
