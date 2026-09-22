@@ -1,0 +1,28 @@
+# Phase 1: LiteLLM gateway to Claude on Bedrock, authenticated by IRSA.
+# Wave 1: after Kyverno (-1) and its policies (0), so the policies are
+# enforcing before this pod is admitted - it has to pass them.
+#
+# No CreateNamespace: tofu owns the `litellm` namespace and the ServiceAccount
+# in it (tofu/litellm.tf). Argo owns only what is in this directory.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: litellm
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/swares/HomeLab-aws.git
+    targetRevision: main
+    path: gitops/workloads/litellm
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: litellm
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

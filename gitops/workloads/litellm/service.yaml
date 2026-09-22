@@ -1,0 +1,19 @@
+# ClusterIP ONLY. Not LoadBalancer, not an Ingress: either would create AWS
+# load balancers outside tofu's knowledge (see scripts/eks-teardown.sh) and
+# expose an unauthenticated LLM gateway. Reach it with `make litellm-smoke`
+# or a port-forward. Phase 2 changes this, with auth.
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: litellm
+  labels:
+    app.kubernetes.io/name: litellm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: litellm
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http

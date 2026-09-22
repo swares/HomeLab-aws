@@ -113,5 +113,10 @@ resource "helm_release" "argocd_root" {
     }
   })]
 
-  depends_on = [helm_release.argocd]
+  depends_on = [
+    helm_release.argocd,
+    # Argo must not deploy gitops/workloads/litellm before tofu has created
+    # the IRSA ServiceAccount it references.
+    kubernetes_service_account_v1.litellm,
+  ]
 }

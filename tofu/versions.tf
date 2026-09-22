@@ -18,6 +18,14 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    # For the IRSA ServiceAccount in litellm.tf. Only v1 resources are used
+    # (kubernetes_namespace_v1, kubernetes_service_account_v1), which validate
+    # at apply time. NOT kubernetes_manifest - that one needs a live cluster
+    # at plan time, which an ephemeral cluster never has.
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = ">= 2.36, < 3.0"
+    }
   }
 }
 
@@ -33,8 +41,8 @@ provider "aws" {
   }
 }
 
-# The helm provider authenticates with a short-lived token minted by the AWS
-# CLI at apply time. This is why the teardown host needs a working `aws`
+# The helm and kubernetes providers authenticate with a short-lived token
+# minted by the AWS CLI at apply time. This is why the teardown host needs a working `aws`
 # binary and not just tofu - see docs/RUNBOOK.md.
 provider "helm" {
   kubernetes {
@@ -46,5 +54,16 @@ provider "helm" {
       command     = "aws"
       args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.this.name, "--region", var.region]
     }
+  }
+}
+
+provider "kubernetes" {
+  host                   = aws_eks_cluster.this.endpoint
+  cluster_ca_certificate = base64decode(aws_eks_cluster.this.certificate_authority[0].data)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.this.name, "--region", var.region]
   }
 }

@@ -122,6 +122,9 @@ data "aws_iam_policy_document" "teardown" {
       "iam:GetRole", "iam:ListRoleTags", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
       "iam:ListInstanceProfilesForRole", "iam:RemoveRoleFromInstanceProfile",
       "iam:DetachRolePolicy", "iam:DeleteRole",
+      # Inline role policies (phase 1: lab-sandbox-litellm's Bedrock policy).
+      # Refresh reads them; destroy deletes them before the role.
+      "iam:GetRolePolicy", "iam:DeleteRolePolicy",
     ]
     resources = ["arn:aws:iam::${local.account_id}:role/${local.cluster}-*"]
   }
