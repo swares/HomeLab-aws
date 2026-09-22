@@ -101,6 +101,10 @@ data "aws_iam_policy_document" "teardown" {
       "ec2:DeleteVpc", "ec2:DeleteSubnet",
       "ec2:DeleteRouteTable", "ec2:DisassociateRouteTable",
       "ec2:DeleteInternetGateway", "ec2:DetachInternetGateway",
+      # Phase 2: tofu's own lab-sandbox-alb-ingress SG carries these tags.
+      # Deleting a security group means revoking its rules first.
+      "ec2:DeleteSecurityGroup",
+      "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
     ]
     resources = ["*"]
     condition {
@@ -142,29 +146,6 @@ data "aws_iam_policy_document" "teardown" {
     }
   }
 
-  # Tofu's own ALB security group (lab-sandbox-alb-ingress) carries the repo
-  # tags, so it is destroyed under the Repo + Lifecycle conditions; deleting
-  # it means revoking its rules first.
-  statement {
-    sid = "Ec2DeleteSandboxSecurityGroup"
-    actions = [
-      "ec2:DeleteSecurityGroup",
-      "ec2:RevokeSecurityGroupIngress",
-      "ec2:RevokeSecurityGroupEgress",
-    ]
-    resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Repo"
-      values   = ["swares/HomeLab-aws"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Lifecycle"
-      values   = ["ephemeral"]
-    }
-  }
-
   # --- IAM: the two sandbox roles and the cluster's OIDC provider only ----
   statement {
     sid = "IamSandboxRoles"
@@ -197,10 +178,30 @@ data "aws_iam_policy_document" "teardown" {
   }
 }
 
-resource "aws_iam_user_policy" "teardown" {
-  name   = "eks-sandbox-teardown"
-  user   = aws_iam_user.teardown.name
-  policy = data.aws_iam_policy_document.teardown.json
+# A MANAGED policy, attached, rather than an inline user policy. Inline user
+# policies cap at 2048 bytes and this one passed that on 2026-09-22 when phase
+# 2 added the security-group statements: PutUserPolicy failed with
+# "LimitExceeded: Maximum policy size of 2048 bytes exceeded". Managed policies
+# allow 6144, and the document is ~3.4 KB today.
+#
+# The cap is on the RENDERED JSON, so whitespace is not the problem and
+# reformatting will not buy room. When phase 3 pushes this past 6144, the fix
+# is a second managed policy (up to 10 can be attached), not wildcards that
+# widen what this key can reach.
+#
+# This is still the only identity whose key sits on a lab node and on paper, so
+# the scoping rules above do not change: read what destroy refreshes, delete
+# only what tofu/ creates, create nothing.
+resource "aws_iam_policy" "teardown" {
+  name        = "eks-sandbox-teardown"
+  path        = "/homelab-aws/"
+  description = "Nightly EKS sandbox teardown. Destroys lab-sandbox; creates nothing."
+  policy      = data.aws_iam_policy_document.teardown.json
+}
+
+resource "aws_iam_user_policy_attachment" "teardown" {
+  user       = aws_iam_user.teardown.name
+  policy_arn = aws_iam_policy.teardown.arn
 }
 
 output "teardown_user_arn" {

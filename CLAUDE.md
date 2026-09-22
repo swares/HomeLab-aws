@@ -83,6 +83,10 @@ The 02:00 timer runs as the `lab-teardown` IAM user
 - **Adding a resource type to `tofu/` means extending that policy in the same
   PR.** Otherwise the first sign is a 02:00 `AccessDenied`, with the cluster
   still running.
+- **Its permissions are a MANAGED policy, attached** (`eks-sandbox-teardown`),
+  not an inline user policy. Inline user policies cap at 2048 bytes and phase 2
+  crossed it; managed allows 6144. Past that, add a second managed policy
+  rather than widening actions to wildcards to save bytes.
 - **Never create its access key in Tofu.** `aws_iam_access_key` would put the
   secret in S3 state. It is created by hand (RUNBOOK "Teardown timer").
 - **Never give the timer an admin key.** The same key is envelope item 8, on

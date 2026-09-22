@@ -244,6 +244,16 @@ echo 'alb_allowed_cidrs = ["A.B.C.D/32"]' >> tofu/terraform.tfvars
 make account-apply                             # teardown identity: SG deletion
 ```
 
+`account-apply` also converts lab-teardown's permissions from an inline user
+policy to a **managed policy** (`eks-sandbox-teardown`, attached). Inline user
+policies cap at 2048 bytes and phase 2 crossed it - the first attempt failed
+with `LimitExceeded: Maximum policy size of 2048 bytes exceeded`. Managed
+allows 6144. Nothing about the scope changes; check it after applying with:
+
+```bash
+aws iam list-attached-user-policies --user-name lab-teardown
+```
+
 Left empty, the security group is created with no ingress rule and the ALB
 answers nobody. A home IP changes; when a demo stops working, check this first.
 
