@@ -103,39 +103,76 @@ kubectl get clusterpolicies                # 3, all Ready
 There is no ingress and no public endpoint for Argo. The UI is reached by
 port-forward only. This is deliberate — see `CLAUDE.md`.
 
-## The teardown host problem
+## Teardown timer
 
-The nightly timer needs a host with `tofu`, the `aws` CLI, and network reach to
-S3 and the EKS API. `aws` is required, not optional: the helm provider mints a
-token by shelling out to `aws eks get-token` during destroy.
+The 02:00 timer on **`n150-2.lab.home.arpa`** is the primary control against a
+forgotten cluster. The budget is only the backstop.
 
-**Host: `n150-2.lab.home.arpa`** (decided 2026-09-12).
+Why n150-2 and not `xu3-1` (the build agent): the Odroid XU3 is ARMv7 32-bit,
+and AWS publishes CLI v2 for `x86_64` and `aarch64` only. Teardown needs `aws`
+for `eks get-token`, which kubectl and the helm provider both call.
 
-Not `xu3-1`, despite it being the obvious choice as the build agent. The Odroid
-XU3 is an Exynos 5422 — Cortex-A15/A7, ARMv7, 32-bit — and AWS publishes CLI v2
-for `x86_64` and `aarch64` only. There is no 32-bit ARM build, so no
-`eks get-token`, so no teardown. (If `xu3-1` is ever needed anyway, AWS CLI v1
-via `pip install awscli` is pure Python and still supports `eks get-token`;
-it is in maintenance mode but adequate.)
+### The pieces
 
-On `n150-2`: the repo goes to `/opt/HomeLab-aws`, credentials to
-`/etc/eks-sandbox/teardown.env` at `0400` owned by the service user, and the
-IAM identity is scoped to teardown — it does **not** need the permissions you
-use to create the cluster interactively.
+| Piece | Where | Why |
+|---|---|---|
+| `lab-teardown` IAM user + scoped policy | `tofu-account/teardown-user.tf` | Can refresh and delete sandbox resources; creates nothing, cannot touch the budget or the account state |
+| Its access key | `/etc/eks-sandbox/teardown.env`, `0400 eks-teardown` | Created by hand so the secret never enters tofu state |
+| Its **Kubernetes** access | access entry in `tofu/eks.tf`, made by every `make eks-up` | AWS permissions alone cannot reach the cluster API; without this the Helm uninstall fails `Unauthorized` and the cluster stays up |
+| `eks-teardown` system user | n150-2 | No login shell; runs the unit |
+| Timer's own checkout | `/opt/HomeLab-aws` | Separate from your working copy; `git pull --ff-only` before every run |
+| Units | `systemd/eks-teardown.{service,timer}` | Hardened; no retries; failures go to the journal only, by design |
 
-```bash
-sudo cp systemd/eks-teardown.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now eks-teardown.timer
-systemctl list-timers eks-teardown.timer
-```
-
-Test it once by hand before trusting it:
+### Install (once)
 
 ```bash
-sudo systemctl start eks-teardown.service
-journalctl -u eks-teardown.service -f
+# 1. The IAM user and its policy - permanent module
+make account-apply
+
+# 2. Its access key, by hand, NOT via tofu
+aws iam create-access-key --user-name lab-teardown
+#    Copy AccessKeyId and SecretAccessKey. This is also envelope item 8.
+
+# 3. Everything on n150-2: user, AWS CLI v2 in /usr/local/bin, /opt clone,
+#    credentials file (prompted, not echoed), units, credential check
+sudo ./scripts/install-teardown-timer.sh
 ```
+
+The script refuses to finish if the key authenticates as anything other than
+`lab-teardown`. An admin key on the timer defeats the point of scoping it.
+
+Re-run the script any time; it is idempotent. `--rotate-key` replaces the
+credentials file. Deactivate the old key in IAM afterwards.
+
+### Verify (before trusting it)
+
+The install only proves the key **authenticates**. The only proof it can
+**tear down** is a real run:
+
+```bash
+make eks-up                                   # as yourself
+sudo systemctl start eks-teardown.service     # as the timer would at 02:00
+journalctl -u eks-teardown.service -f         # expect "Teardown complete."
+```
+
+Then the orphan sweep below, and `make eks-status` should say nothing is
+billing. Also run it once with no cluster up; it should exit 0.
+
+### When a nightly run fails
+
+```bash
+systemctl status eks-teardown.service
+journalctl -u eks-teardown.service --since yesterday
+```
+
+- **`AccessDenied` naming an action.** A resource type was added to `tofu/`
+  without extending `tofu-account/teardown-user.tf`. Add the action,
+  `make account-apply`, `sudo systemctl start eks-teardown.service`.
+- **`Unauthorized` from kubectl or Helm.** The cluster was created before the
+  teardown access entry existed, or the entry was removed. Run `make eks-down`
+  as yourself.
+- **Anything else.** Run `make eks-down` as yourself first to stop the billing,
+  then diagnose. The cluster costs money while you debug the timer.
 
 ## Failure recovery
 
@@ -198,7 +235,12 @@ aws resourcegroupstaggingapi get-resources --region us-east-1 \
 ```
 
 Everything `tofu/` creates carries `Lifecycle=ephemeral` via `default_tags`, so
-anything this lists after a teardown is an orphan. The `Lifecycle` filter
+anything this lists after a teardown is *probably* an orphan. Confirm before
+acting: the tagging index lags, and can keep listing a resource for a while
+after it is deleted. On 2026-09-21 it returned a subnet that
+`aws ec2 describe-subnets --subnet-ids <id>` showed did not exist
+(`InvalidSubnetID.NotFound`). Check every hit with the matching `describe-*`
+call. The `Lifecycle` filter
 matters: the permanent budget in `tofu-account/` carries the same `Repo` tag
 but `Lifecycle=permanent`, and must not show up as a leftover.
 
@@ -207,7 +249,8 @@ but `Lifecycle=permanent`, and must not show up as a leftover.
 - [ ] `make eks-up` then `make eks-down` twice, cleanly, back to back
 - [ ] `resourcegroupstaggingapi` returns nothing after teardown
 - [ ] Permanent budget applied (`make account-apply`) and its lock file committed
-- [ ] Timer fires on n150-2 and the service user's credentials work
+- [ ] `install-teardown-timer.sh` completed and authenticated as `lab-teardown`
+- [ ] A real `systemctl start eks-teardown.service` tore down a live cluster
 - [ ] `make eks-down` with no cluster present exits 0
 - [ ] Break-glass envelope filled, sealed, stored off-site
 - [ ] Drill A passed: teardown from a machine with no AWS credentials

@@ -52,6 +52,12 @@ resource "helm_release" "argocd" {
     aws_eks_node_group.spot,
     aws_eks_addon.coredns,
     aws_eks_addon.vpc_cni,
+    # LOAD-BEARING FOR THE NIGHTLY TEARDOWN, not for install. Destroy runs in
+    # reverse dependency order, so this guarantees both Helm releases are
+    # uninstalled while lab-teardown still has Kubernetes access. Without it,
+    # tofu may delete the access entry in parallel with the uninstall, and the
+    # timer's destroy fails Unauthorized halfway - cluster still up.
+    aws_eks_access_policy_association.teardown,
   ]
 }
 

@@ -4,7 +4,8 @@
 # budget is permanent and no longer part of this module. An old tfvars that
 # still sets it only produces an "undeclared variable" warning; delete the line.
 
-# Only needed if the identity running the nightly teardown on n150-2 differs
-# from the identity that runs `tofu apply` interactively. The apply identity
-# already gets cluster-admin via bootstrap_cluster_creator_admin_permissions.
-# extra_admin_principal_arns = ["arn:aws:iam::111111111111:user/lab-teardown"]
+# Nothing is required here. The nightly teardown identity (lab-teardown) is
+# granted cluster access automatically; see tofu/eks.tf.
+#
+# Only for a THIRD identity that needs cluster-admin:
+# extra_admin_principal_arns = ["arn:aws:iam::111111111111:user/someone"]

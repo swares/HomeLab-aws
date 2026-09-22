@@ -143,12 +143,19 @@ variable "argocd_apps_chart_version" {
   default     = "2.0.5"
 }
 
+variable "teardown_user_name" {
+  description = "IAM user the nightly teardown runs as. Created by tofu-account/, granted cluster-admin by tofu/eks.tf."
+  type        = string
+  default     = "lab-teardown"
+}
+
 variable "extra_admin_principal_arns" {
   description = <<-EOT
     Extra IAM principals granted cluster-admin via EKS access entries. The
     identity that runs `tofu apply` already gets admin via
-    bootstrap_cluster_creator_admin_permissions. Add the n150-2 teardown
-    identity here if it differs from your interactive one.
+    bootstrap_cluster_creator_admin_permissions, and lab-teardown gets it
+    from its own access entry in eks.tf. Leave empty unless a third identity
+    needs cluster access.
   EOT
   type        = list(string)
   default     = []

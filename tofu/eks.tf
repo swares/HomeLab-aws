@@ -26,18 +26,48 @@ resource "aws_eks_cluster" "this" {
     # version leaves standard support moves silently to $0.60/hr (6x). With
     # STANDARD, EKS auto-upgrades it instead - a surprise, but a free one.
     #
-    # NOT YET TESTED: what EKS does when you CREATE a cluster with STANDARD on
-    # a version already past standard support. The API reference only
-    # describes existing clusters. If cluster_version is ever left stale, the
-    # first `make eks-up` after that date will show us - check the error or
-    # the resulting version before assuming either way.
+    # Tested 2026-09-21: EKS accepts STANDARD when creating a cluster on a
+    # version in standard support (1.35), and reports it back unchanged.
+    # STILL UNTESTED: creating with STANDARD on a version already PAST
+    # standard support - the API reference only describes existing clusters.
+    # If cluster_version is ever left stale, check the first `make eks-up`
+    # after that date before assuming either way.
     support_type = "STANDARD"
   }
 
   depends_on = [aws_iam_role_policy_attachment.cluster]
 }
 
-# Extra admins (e.g. the n150-2 teardown identity, if it differs from yours).
+# --- The nightly teardown identity -----------------------------------------
+# lab-teardown (tofu-account/teardown-user.tf) has AWS permissions to destroy
+# this cluster, but AWS permissions alone do not reach the Kubernetes API: the
+# teardown script deletes Argo Applications with kubectl, and `tofu destroy`
+# uninstalls two Helm releases. Both need this access entry.
+#
+# Looked up by name, so `make account-apply` must have run first (RUNBOOK
+# bootstrap step 2). If it has not, plan fails here, loudly - better than a
+# cluster the 02:00 timer cannot tear down.
+data "aws_iam_user" "teardown" {
+  user_name = var.teardown_user_name
+}
+
+resource "aws_eks_access_entry" "teardown" {
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = data.aws_iam_user.teardown.arn
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "teardown" {
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = data.aws_iam_user.teardown.arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope { type = "cluster" }
+
+  depends_on = [aws_eks_access_entry.teardown]
+}
+
+# Extra admins beyond yourself and lab-teardown (unused by default).
 resource "aws_eks_access_entry" "admin" {
   for_each = toset(var.extra_admin_principal_arns)
 

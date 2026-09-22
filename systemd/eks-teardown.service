@@ -1,39 +1,75 @@
 # Nightly unconditional teardown of the EKS sandbox.
 #
-# HOST: n150-2.lab.home.arpa (x86_64).
+# HOST: n150-2.lab.home.arpa (x86_64). Install with
+#   sudo ./scripts/install-teardown-timer.sh
+# which is idempotent and does everything below. Do not hand-copy this file.
 #
 # NOT xu3-1, despite it being the obvious choice as the build agent: the Odroid
 # XU3 is an Exynos 5422 - ARMv7, 32-bit - and AWS does not publish a 32-bit ARM
-# build of CLI v2. This script needs `aws` for `eks get-token`, which the helm
-# provider shells out to during destroy, so no AWS CLI means no teardown.
+# build of CLI v2. This needs `aws` for `eks get-token`, which kubectl and the
+# helm provider both shell out to during teardown.
 #
-# Install:
-#   sudo cp systemd/eks-teardown.{service,timer} /etc/systemd/system/
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now eks-teardown.timer
+# Runs as eks-teardown (system user, no login) with the lab-teardown IAM
+# user's key. That IAM user can only destroy the sandbox - see
+# tofu-account/teardown-user.tf. Failure is reported in the journal only, by
+# design; the permanent budget is the backstop if a failure goes unnoticed:
+#   journalctl -u eks-teardown.service --since yesterday
 
 [Unit]
 Description=Tear down the EKS sandbox cluster (ordered)
-Documentation=https://github.com/swares/HomeLab-aws
+Documentation=https://github.com/swares/HomeLab-aws/blob/main/docs/RUNBOOK.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=lab
+User=eks-teardown
+Group=eks-teardown
 WorkingDirectory=/opt/HomeLab-aws
+
+# Credentials. Required - no leading "-" - so a missing file fails the unit
+# visibly instead of running with no identity and "succeeding" at nothing.
+EnvironmentFile=/etc/eks-sandbox/teardown.env
+
 Environment=AWS_REGION=us-east-1
 Environment=CLUSTER_NAME=lab-sandbox
 Environment=REPO_DIR=/opt/HomeLab-aws
-# Credentials: file at 0400, owned by the service user. Scope this IAM identity
-# to what teardown needs - it does NOT need the permissions used to create the
-# cluster interactively.
-EnvironmentFile=-/etc/eks-sandbox/teardown.env
+# n150-2 is not an EC2 instance; skip the metadata probe's timeout entirely.
+Environment=AWS_EC2_METADATA_DISABLED=true
+# Explicit PATH: /usr/local/bin is where install-teardown-timer.sh puts the
+# AWS CLI. The interactive `aws` in ~swares/.local/bin is invisible here.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# StateDirectory gives the user a writable home for the AWS CLI's cache
+# without a real home directory. Providers live in the checkout's own
+# tofu/.terraform, which persists between runs.
+StateDirectory=eks-teardown
+Environment=HOME=/var/lib/eks-teardown
+
+# Bring the checkout up to date first, so it destroys with the same code that
+# built the cluster. Fast-forward only. The leading "-" means a failed pull
+# (network down, local edits) is logged and teardown proceeds with what is on
+# disk - a slightly stale destroy beats no destroy.
+ExecStartPre=-/usr/bin/git -C /opt/HomeLab-aws pull --ff-only --quiet
 ExecStart=/opt/HomeLab-aws/scripts/eks-teardown.sh
+
+# EKS cluster deletion alone has taken 3.5 minutes; the whole ordered teardown
+# ~8. 45 minutes covers a slow night with margin.
 TimeoutStartSec=2700
-# Do not retry on failure: a half-failed destroy needs a human, and a retry
-# loop against the AWS API at 2am is worse than a clear failure.
+# No retries: a half-failed destroy needs a human, and a retry loop against
+# the AWS API at 2am is worse than one clear failure in the journal.
 Restart=no
+
+# Hardening. The unit needs to write only its checkout and state directory.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/HomeLab-aws
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target
