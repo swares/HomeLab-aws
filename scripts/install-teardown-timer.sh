@@ -33,8 +33,8 @@ ENV_FILE=$ENV_DIR/teardown.env
 EXPECTED_USER_SUFFIX=":user/homelab-aws/lab-teardown"
 ROTATE=0
 
-[ "${1:-}" = "--rotate-key" ] && ROTATE=1
-[ "$(id -u)" -eq 0 ] || { echo "Run with sudo." >&2; exit 1; }
+[[ "${1:-}" = "--rotate-key" ]] && ROTATE=1
+[[ "$(id -u)" -eq 0 ]] || { echo "Run with sudo." >&2; exit 1; }
 SRC_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
 log() { printf '==> %s\n' "$*"; }
@@ -52,12 +52,15 @@ fi
 install -d -o "$SVC_USER" -g "$SVC_USER" -m 0750 /var/lib/eks-teardown
 
 # --- 2. AWS CLI v2, system-wide -------------------------------------------------
-if [ -x /usr/local/bin/aws ] && /usr/local/bin/aws --version 2>&1 | grep -q '^aws-cli/2'; then
+if [[ -x /usr/local/bin/aws ]] && /usr/local/bin/aws --version 2>&1 | grep -q '^aws-cli/2'; then
   log "AWS CLI v2 present: $(/usr/local/bin/aws --version 2>&1 | cut -d' ' -f1)"
 else
   log "Installing AWS CLI v2 to /usr/local/bin"
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-  curl -fsSL -o "$tmp/awscliv2.zip" https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+  # --proto '=https': -L follows redirects, and without this a redirect to
+  # plain http:// would be followed for a binary about to run as root.
+  curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/awscliv2.zip" \
+       https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
   unzip -q "$tmp/awscliv2.zip" -d "$tmp"
   "$tmp/aws/install" --update --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli
 fi
@@ -66,7 +69,7 @@ for bin in tofu kubectl git; do
 done
 
 # --- 3. the timer's own checkout ---------------------------------------------
-if [ -d "$DEST/.git" ]; then
+if [[ -d "$DEST/.git" ]]; then
   log "Updating $DEST"
   # An earlier RUNBOOK revision cloned this as root and chowned it to a user
   # called "lab". Take ownership so the service can pull and run tofu init.
@@ -77,19 +80,19 @@ else
   install -d -o "$SVC_USER" -g "$SVC_USER" -m 0755 "$DEST"
   sudo -u "$SVC_USER" git clone --quiet "$REPO_URL" "$DEST"
 fi
-[ -f "$DEST/tofu/.terraform.lock.hcl" ] || {
+[[ -f "$DEST/tofu/.terraform.lock.hcl" ]] || {
   echo "FATAL: $DEST has no tofu/.terraform.lock.hcl - is main up to date?" >&2; exit 1; }
 
 # --- 4. credentials ------------------------------------------------------------
 install -d -o root -g "$SVC_USER" -m 0750 "$ENV_DIR"
-if [ -f "$ENV_FILE" ] && [ "$ROTATE" -eq 0 ]; then
+if [[ -f "$ENV_FILE" ]] && [[ "$ROTATE" -eq 0 ]]; then
   log "$ENV_FILE exists (use --rotate-key to replace it)"
 else
   log "Enter the lab-teardown access key. Input is not echoed."
   read -r -s -p "  Access key ID:     " AKID </dev/tty; echo
   read -r -s -p "  Secret access key: " SAK  </dev/tty; echo
   [[ "$AKID" =~ ^AKIA[A-Z0-9]{16}$ ]] || { echo "FATAL: that is not an AKIA... key ID" >&2; exit 1; }
-  [ "${#SAK}" -eq 40 ] || { echo "FATAL: secret should be 40 characters" >&2; exit 1; }
+  [[ "${#SAK}" -eq 40 ]] || { echo "FATAL: secret should be 40 characters" >&2; exit 1; }
   umask 077
   tmpenv=$(mktemp "$ENV_DIR/.teardown.env.XXXXXX")
   printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n' "$AKID" "$SAK" > "$tmpenv"
