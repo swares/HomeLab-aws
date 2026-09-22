@@ -17,9 +17,11 @@
 # So: delete the Kubernetes objects first, WAIT for the controller to finish
 # the AWS-side deletion, and only then destroy the infrastructure.
 #
-# Phase 0 has no Ingress and no LoadBalancer Service, so the wait is a no-op
-# today. It is built in now because phase 2 adds the ALB controller, and the
-# failure mode above is much easier to avoid than to diagnose at 2am.
+# Phase 2 made that wait real: the first live ALB went through it on
+# 2026-09-22. Note WHAT is waited for - an ALB drops out of
+# DescribeLoadBalancers almost immediately, while the ENIs it leaves in the
+# subnets are what actually blocks the VPC delete. So the wait requires both
+# to be gone, not just the load balancer record.
 #
 # Safe to run when no cluster exists - exits 0.
 # ---------------------------------------------------------------------------
@@ -98,15 +100,25 @@ if [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
       --query "length(LoadBalancers[?VpcId=='${vpc_id}'])" --output text 2>/dev/null || echo 0)"
     classic="$(aws elb describe-load-balancers --region "$REGION" \
       --query "length(LoadBalancerDescriptions[?VPCId=='${vpc_id}'])" --output text 2>/dev/null || echo 0)"
-    if [[ "$count" == "0" && "$classic" == "0" ]]; then
-      log "No load balancers remain in ${vpc_id}."
+    # The ENIs, not the load balancer record, are what fails the VPC delete.
+    # AWS drops a deleted ALB from DescribeLoadBalancers within seconds while
+    # its interfaces detach for a while longer; on 2026-09-22 this loop said
+    # "none remain" 3s after the Ingress went, and only the minutes spent
+    # deleting the cluster and nodegroup covered the difference. ELB-owned
+    # interfaces are the ones whose Description starts "ELB ".
+    enis="$(aws ec2 describe-network-interfaces --region "$REGION" \
+      --filters "Name=vpc-id,Values=${vpc_id}" \
+      --query "length(NetworkInterfaces[?starts_with(Description, 'ELB ')])" \
+      --output text 2>/dev/null || echo 0)"
+    if [[ "$count" == "0" && "$classic" == "0" && "$enis" == "0" ]]; then
+      log "No load balancers or ELB interfaces remain in ${vpc_id}."
       break
     fi
-    log "  ${count} v2 + ${classic} classic still present; waiting..."
+    log "  ${count} v2 + ${classic} classic LBs, ${enis} ELB interfaces; waiting..."
     sleep 15
   done
   if (( SECONDS >= deadline )); then
-    log "WARN: load balancers still present after ${LB_WAIT_SECONDS}s."
+    log "WARN: load balancers or their interfaces still present after ${LB_WAIT_SECONDS}s."
     log "WARN: destroy may fail on DependencyViolation. See docs/RUNBOOK.md."
   fi
 fi

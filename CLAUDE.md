@@ -156,6 +156,11 @@ cannot see, and the cleanup is manual and billable.
 The order is: delete the Kubernetes objects → **wait** for AWS to actually
 remove the load balancers → destroy. `scripts/eks-teardown.sh` does all three.
 
+The wait requires the load balancers **and** their ENIs to be gone. A deleted
+ALB disappears from `DescribeLoadBalancers` in seconds while its interfaces
+detach for longer, and the interfaces are what `DeleteVpc` refuses over. Do not
+"simplify" that check back to counting load balancers.
+
 Phase 0 had no Ingress, so the wait was a no-op. Phase 2 makes it
 load-bearing. Do not remove it.
 

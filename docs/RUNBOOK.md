@@ -313,6 +313,11 @@ aws ec2 describe-security-groups --filters Name=tag-key,Values=elbv2.k8s.aws/clu
 Clean up the test objects afterwards if you are not tearing down:
 `kubectl delete ingress/echo svc/echo deploy/echo`.
 
+What the wait actually checks: load balancers **and** ELB-owned network
+interfaces in the VPC. A deleted ALB leaves `DescribeLoadBalancers` within
+seconds, but its ENIs linger, and those are what fail the VPC delete. Tune the
+ceiling with `LB_WAIT_SECONDS` (default 300) if a teardown ever warns.
+
 Both queries must come back empty. If they don't, the resources are billing:
 delete them by hand (see "Destroy fails with `DependencyViolation`" below) and
 fix the ordering before running the timer again.
