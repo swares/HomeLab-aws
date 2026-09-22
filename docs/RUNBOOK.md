@@ -193,7 +193,8 @@ journalctl -u eks-teardown.service --since yesterday
      --query 'output.message.content[0].text' --output text
    ```
    Any reply means the account is ready. `AccessDeniedException` mentioning
-   the use-case form means step 1 hasn't gone through yet.
+   the use-case form means step 1 hasn't gone through yet. `Error 002` is an
+   account-level block, usually billing - see the table below.
 3. **Extend the teardown policy first:** `make account-apply`. The phase-1 role
    has an inline policy, and without `iam:DeleteRolePolicy` the 02:00 timer
    fails `AccessDenied` on it with the cluster still up.
@@ -203,10 +204,15 @@ journalctl -u eks-teardown.service --since yesterday
 ```bash
 make eks-up
 eval "$(make -s eks-env)"
-kubectl -n argocd get applications     # litellm Synced/Healthy, alongside the others
 make irsa-check                        # AWS_ROLE_ARN + token file present, NO static keys
 make litellm-smoke                     # a real Claude reply through LiteLLM
 ```
+
+Argo CD creates the `litellm` Deployment a few minutes after `eks-up` returns
+(root app -> litellm app -> manifests), so both targets first wait for it via
+`litellm-wait` - up to `LITELLM_WAIT` seconds, 300 by default - and then wait
+for the rollout. Watch it happen with
+`kubectl -n argocd get applications -w` if you want to see the waves land.
 
 `irsa-check` is the lesson made visible: the pod holds a role ARN and a path to
 a Kubernetes-issued token, and no AWS key of any kind.
@@ -220,6 +226,7 @@ a Kubernetes-issued token, and no AWS key of any kind.
 | Smoke test: `AccessDeniedException ... not authorized to perform: sts:AssumeRoleWithWebIdentity` | Trust policy `sub`/`aud` doesn't match the SA, or the OIDC provider is missing. `tofu/litellm.tf` |
 | Smoke test: `AccessDeniedException ... bedrock:InvokeModel` on a **foundation-model ARN in another region** | The inference profile routed the call to a region the policy doesn't list. Add it to `bedrock_profile_dest_regns` |
 | Smoke test: mentions the use-case form or Marketplace | Prerequisite 1 or 2 hasn't been done |
+| Any Bedrock call, from **any** identity and **any** model (including Amazon Nova), fails `ValidationException: Error 002: Access to Bedrock models is not allowed for this account` | Not IAM and not model access - the whole account is restricted. Seen 2026-09-22 after a credit card on the account expired. Fix the payment method in the Billing console; if that doesn't clear it within a day, open a free **Account and billing** support case. `aws freetier get-account-plan-state` returning `FREE` instead means the account needs upgrading to the paid plan |
 
 ## Failure recovery
 
