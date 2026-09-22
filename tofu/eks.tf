@@ -21,6 +21,19 @@ resource "aws_eks_cluster" "this" {
     bootstrap_cluster_creator_admin_permissions = true
   }
 
+  upgrade_policy {
+    # STANDARD, not the EKS default EXTENDED. With EXTENDED, a cluster whose
+    # version leaves standard support moves silently to $0.60/hr (6x). With
+    # STANDARD, EKS auto-upgrades it instead - a surprise, but a free one.
+    #
+    # NOT YET TESTED: what EKS does when you CREATE a cluster with STANDARD on
+    # a version already past standard support. The API reference only
+    # describes existing clusters. If cluster_version is ever left stale, the
+    # first `make eks-up` after that date will show us - check the error or
+    # the resulting version before assuming either way.
+    support_type = "STANDARD"
+  }
+
   depends_on = [aws_iam_role_policy_attachment.cluster]
 }
 

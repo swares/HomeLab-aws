@@ -33,7 +33,8 @@ one `tofu destroy` leaves no trace on either side.
 
 | Path | What it is |
 |---|---|
-| `tofu/` | Root module: VPC, IAM, EKS, addons, Argo CD bootstrap, budget |
+| `tofu/` | Root module: VPC, IAM, EKS, addons, Argo CD bootstrap. Destroyed nightly |
+| `tofu-account/` | **Permanent** root module: the monthly budget. Never torn down |
 | `gitops/apps/` | App-of-apps children (Argo `Application` objects) |
 | `gitops/workloads/` | Manifests the Applications point at |
 | `gitops/bootstrap/` | Reference copy of the root Application (the live one is in `tofu/argocd.tf`) |
@@ -46,13 +47,20 @@ one `tofu destroy` leaves no trace on either side.
 
 ```bash
 # One-time: create the state bucket (see tofu/backend.tf for the commands)
-cp tofu/terraform.tfvars.example tofu/terraform.tfvars   # set budget_email
+cp tofu-account/terraform.tfvars.example tofu-account/terraform.tfvars  # set budget_email
+make account-init && make account-apply     # permanent budget - once, not per session
+cp tofu/terraform.tfvars.example tofu/terraform.tfvars
 make init
 
-make eks-up        # ~15 min. Billing starts.
-make argocd-ui     # password + port-forward on :8080
-make eks-down      # ordered teardown
+make eks-up                   # ~15 min. Billing starts.
+eval "$(make -s eks-env)"     # point THIS shell's kubectl at the sandbox
+make argocd-ui                # password + port-forward on :8080
+make eks-down                 # ordered teardown; also deletes the sandbox kubeconfig
 ```
+
+The sandbox never writes to `~/.kube/config`. Its kubeconfig lives in
+`~/.kube/eks-sandbox`, so a shell you didn't `eval` in still talks to whatever
+it talked to before - on n150-2, that's the lab.
 
 `make eks-status` answers "is anything billing right now?"
 

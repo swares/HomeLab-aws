@@ -36,6 +36,22 @@ remembered, quietly accruing charges.
 - Run `make eks-status` before assuming nothing is running.
 - The nightly timer at 02:00 is the primary control. The Budget alarm is the
   backstop for the night it did not fire.
+- **The budget lives in `tofu-account/`, never in `tofu/`.** `tofu/` is
+  destroyed nightly; a backstop destroyed alongside the thing it watches is not
+  a backstop. On the first real teardown the budget went early in the destroy,
+  so a teardown failing halfway would have left the cluster up and the alarm
+  gone. Never add `tofu-account/` to `make eks-down` or the teardown script.
+- `upgrade_policy` is `STANDARD`, not the EKS default `EXTENDED`: a cluster
+  left on an old version gets auto-upgraded rather than billed 6x.
+
+## Never write the sandbox into `~/.kube/config`
+
+n150-2 is a k3s server. On 2026-09-21 `aws eks update-kubeconfig` switched the
+shared `~/.kube/config` to EKS, so plain `kubectl` as `swares` silently stopped
+pointing at the lab. The sandbox kubeconfig is `~/.kube/eks-sandbox`, written
+by `make eks-kubeconfig` and deleted by `make eks-down`. Point a shell at it
+with `eval "$(make -s eks-env)"`. Any new tooling that needs cluster access
+takes `KUBECONFIG` explicitly, the way `argocd-ui` and the teardown script do.
 
 ## Lockout is a billing event, not just an access problem
 
