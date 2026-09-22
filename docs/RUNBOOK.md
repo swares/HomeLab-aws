@@ -29,18 +29,26 @@ If you also stand up the restic S3 target (Seam C), create both buckets in the
 same sitting. Restic's bucket wants Object Lock, which **must** be enabled at
 creation time and cannot be added later.
 
-### 2. tfvars
+### 2. The permanent budget (once, not per session)
+
+```bash
+cp tofu-account/terraform.tfvars.example tofu-account/terraform.tfvars
+# set budget_email
+make account-init
+make account-apply
+git add tofu-account/.terraform.lock.hcl && git commit   # first time only
+```
+
+This is the backstop for a cluster nobody tore down, so it is deliberately
+outside the module that gets destroyed. It covers the whole account, and it
+emails you directly: there's no SNS subscription to confirm.
+
+### 3. Sandbox tfvars
 
 ```bash
 cp tofu/terraform.tfvars.example tofu/terraform.tfvars
-# set budget_email
 make init
 ```
-
-### 3. Confirm the SNS subscription
-
-The first apply sends a confirmation email. Until you click it, the
-subscription sits `PendingConfirmation` and the budget alarm delivers nothing.
 
 ### 4. Fill the break-glass envelope
 
@@ -75,12 +83,16 @@ you can stop the billing without your workstation or the lab.
 ## Daily use
 
 ```bash
-make eks-up        # ~15 min
-make argocd-ui     # password + port-forward :8080
-make eks-down
+make eks-up                   # ~15 min
+eval "$(make -s eks-env)"     # point this shell at the sandbox
+make argocd-ui                # password + port-forward :8080
+make eks-down                 # also deletes ~/.kube/eks-sandbox
 ```
 
-Verify after `eks-up`:
+The sandbox kubeconfig is `~/.kube/eks-sandbox`, never `~/.kube/config`. A
+shell where you haven't run the `eval` still points wherever it did before.
+
+Verify after `eks-up` (in the `eval`'d shell):
 
 ```bash
 kubectl get nodes                          # 2 Ready
@@ -180,19 +192,21 @@ Only do this when certain no other apply is running.
 
 ```bash
 make cost
-aws resourcegroupstaggingapi get-resources \
-  --tag-filters Key=Repo,Values=swares/HomeLab-aws \
+aws resourcegroupstaggingapi get-resources --region us-east-1 \
+  --tag-filters Key=Repo,Values=swares/HomeLab-aws Key=Lifecycle,Values=ephemeral \
   --query 'ResourceTagMappingList[].ResourceARN' --output text
 ```
 
-Every resource this module creates carries `Repo=swares/HomeLab-aws` via
-`default_tags`, so anything listed there and not in state is an orphan.
+Everything `tofu/` creates carries `Lifecycle=ephemeral` via `default_tags`, so
+anything this lists after a teardown is an orphan. The `Lifecycle` filter
+matters: the permanent budget in `tofu-account/` carries the same `Repo` tag
+but `Lifecycle=permanent`, and must not show up as a leftover.
 
 ## Verifying before the first real session
 
 - [ ] `make eks-up` then `make eks-down` twice, cleanly, back to back
 - [ ] `resourcegroupstaggingapi` returns nothing after teardown
-- [ ] SNS subscription confirmed
+- [ ] Permanent budget applied (`make account-apply`) and its lock file committed
 - [ ] Timer fires on n150-2 and the service user's credentials work
 - [ ] `make eks-down` with no cluster present exits 0
 - [ ] Break-glass envelope filled, sealed, stored off-site

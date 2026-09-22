@@ -1,11 +1,18 @@
 # Convenience targets for the EKS sandbox. Mirrors the conventions in
 # swares/HomeLab: `make help` greps the ## comments.
-.PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig argocd-ui cost fmt validate
+.PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui cost fmt validate \
+        account-init account-plan account-apply
 
 TOFU      ?= tofu
 TOFU_DIR   = tofu
 REGION    ?= us-east-1
 CLUSTER   ?= lab-sandbox
+
+# The sandbox gets its OWN kubeconfig file. Never ~/.kube/config: on n150-2
+# (a k3s server) `aws eks update-kubeconfig` switched the shared file's
+# current-context to EKS, so plain `kubectl` stopped pointing at the lab.
+# Use `eval "$(make -s eks-env)"` to point a shell at the sandbox.
+EKS_KUBECONFIG ?= $(HOME)/.kube/eks-sandbox
 
 help:        ## Show this help
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t-/' | sort
@@ -24,6 +31,7 @@ eks-up:      ## Create the sandbox cluster (~15 min). BILLING STARTS NOW.
 
 eks-down:    ## Ordered teardown: prune Argo apps, wait for LBs, then destroy
 	./scripts/eks-teardown.sh
+	@rm -f $(EKS_KUBECONFIG) && echo "Removed $(EKS_KUBECONFIG) (cluster is gone)."
 
 eks-status:  ## Is anything running (and billing)?
 	@aws eks describe-cluster --name $(CLUSTER) --region $(REGION) \
@@ -31,14 +39,19 @@ eks-status:  ## Is anything running (and billing)?
 		--output table 2>/dev/null \
 		|| echo "No cluster '$(CLUSTER)' in $(REGION) - nothing billing."
 
-eks-kubeconfig: ## Point kubectl at the sandbox
-	aws eks update-kubeconfig --name $(CLUSTER) --region $(REGION)
+eks-kubeconfig: ## Write the sandbox kubeconfig to its own file (never ~/.kube/config)
+	@mkdir -p $(dir $(EKS_KUBECONFIG))
+	aws eks update-kubeconfig --name $(CLUSTER) --region $(REGION) --kubeconfig $(EKS_KUBECONFIG)
+	@echo 'Point this shell at the sandbox with:  eval "$$(make -s eks-env)"'
+
+eks-env:     ## Print the export line; use: eval "$(make -s eks-env)"
+	@echo "export KUBECONFIG=$(EKS_KUBECONFIG)"
 
 argocd-ui:   ## Print the admin password and start a port-forward on :8080
-	@kubectl -n argocd get secret argocd-initial-admin-secret \
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n argocd get secret argocd-initial-admin-secret \
 		-o jsonpath='{.data.password}' | base64 -d; echo
 	@echo "user: admin   ->  http://localhost:8080"
-	kubectl -n argocd port-forward svc/argocd-server 8080:443
+	KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n argocd port-forward svc/argocd-server 8080:443
 
 cost:        ## Month-to-date spend
 	@aws ce get-cost-and-usage \
@@ -51,3 +64,14 @@ fmt:         ## Format HCL
 
 validate:    ## Validate HCL
 	cd $(TOFU_DIR) && $(TOFU) validate
+
+# --- Permanent, account-level resources (tofu-account/). NOT torn down. ------
+
+account-init: ## Initialise the permanent account module (budget)
+	cd tofu-account && $(TOFU) init
+
+account-plan: ## Plan the permanent account module
+	cd tofu-account && $(TOFU) plan
+
+account-apply: ## Apply the permanent account module. Never part of eks-down.
+	cd tofu-account && $(TOFU) apply

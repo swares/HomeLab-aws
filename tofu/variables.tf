@@ -143,17 +143,6 @@ variable "argocd_apps_chart_version" {
   default     = "2.0.5"
 }
 
-variable "budget_limit_usd" {
-  description = "Monthly budget. Alarms are the backstop for the forgotten-cluster failure mode; the nightly teardown timer is the primary control."
-  type        = string
-  default     = "40"
-}
-
-variable "budget_email" {
-  description = "Email for budget + teardown alarms. Set in terraform.tfvars."
-  type        = string
-}
-
 variable "extra_admin_principal_arns" {
   description = <<-EOT
     Extra IAM principals granted cluster-admin via EKS access entries. The

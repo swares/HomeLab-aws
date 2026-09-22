@@ -16,13 +16,13 @@ output "oidc_provider_url" {
 }
 
 output "kubeconfig_command" {
-  value = "aws eks update-kubeconfig --name ${aws_eks_cluster.this.name} --region ${var.region}"
+  description = "Writes to a dedicated file, never ~/.kube/config. `make eks-kubeconfig` runs this."
+  value       = "aws eks update-kubeconfig --name ${aws_eks_cluster.this.name} --region ${var.region} --kubeconfig ~/.kube/eks-sandbox"
 }
 
 output "argocd_ui" {
   value = <<-EOT
-    kubectl -n argocd port-forward svc/argocd-server 8080:443
-    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+    make argocd-ui     (password + port-forward, using ~/.kube/eks-sandbox)
     then: http://localhost:8080  (user: admin)
   EOT
 }
