@@ -23,7 +23,7 @@
 # never in git, Tofu state, or on disk: `make litellm-key` prompts for it and
 # writes it straight into the Secret `litellm-anthropic`, which dies with the
 # cluster every night. The Deployment marks that Secret optional, so without
-# `make litellm-key` the pod still starts, Bedrock still works, and only the
+# `make litellm-key` the pod still starts, the Bedrock path is unaffected, and only the
 # fallback fails. `os.environ/` is resolved when LiteLLM starts, so a key added
 # later needs a pod restart - `make litellm-key` does that.
 apiVersion: v1
