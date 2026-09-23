@@ -173,6 +173,13 @@ ALB disappears from `DescribeLoadBalancers` in seconds while its interfaces
 detach for longer, and the interfaces are what `DeleteVpc` refuses over. Do not
 "simplify" that check back to counting load balancers.
 
+**The wait fails closed.** A query that errors (throttling, an expired
+credential, a missing permission) counts as "still present", never as 0, and
+the error is logged. The VPC lookup follows the same rule: an error is retried,
+and only a real "no such VPC" skips the wait. When the deadline passes, the
+script still runs `tofu destroy`, because stopping the billing comes first.
+Never put back `|| echo 0` or `|| echo None` on these calls.
+
 Phase 0 had no Ingress, so the wait was a no-op. Phase 2 makes it
 load-bearing. Do not remove it.
 
