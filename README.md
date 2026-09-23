@@ -75,7 +75,7 @@ stop it.
 | Argo CD | `argocd` | Installed by Tofu, not by itself. Dies with the cluster. |
 | Kyverno | `kyverno` | Helm chart, sync-wave -1 |
 | Kyverno policies | `kyverno` | Three ClusterPolicies vendored from HomeLab, sync-wave 0 |
-| LiteLLM | `litellm` | Phase 1. OpenAI-compatible gateway to Claude Haiku 4.5 on Bedrock, sync-wave 1. **No AWS keys**: the pod gets credentials through IRSA. ClusterIP only |
+| LiteLLM | `litellm` | Phase 1. OpenAI-compatible gateway to Claude Haiku 4.5 on Bedrock, sync-wave 1. **No AWS keys**: the pod gets credentials through IRSA. Falls back to the Anthropic API directly while the Bedrock quota is low; that key is prompted per session by `make litellm-key` and never in git or Tofu. ClusterIP only |
 | AWS Load Balancer Controller | `kube-system` | Phase 2. Installed by Tofu. Turns Ingress objects into real ALBs - resources Tofu has no record of, which is why teardown is ordered |
 
 The ALB's allowed source CIDR is **not in this repo**: Tofu builds the
@@ -97,6 +97,7 @@ it are created and destroyed together.
 | gp3 volumes, 30 GB ×2 | ~$0.08/GB-mo | ~$0.05 |
 | NAT Gateway | **not created** | $0.00 |
 | Bedrock, Claude Haiku 4.5 | per token | cents for a session of testing |
+| Anthropic API, Claude Haiku 4.5 (fallback) | per token, billed by Anthropic | cents; only when Bedrock fails. Not in the AWS Budget |
 | Application Load Balancer | ~$0.023/hr + LCUs | ~$0.20 (phase 2, only while an Ingress exists) |
 | **Total** | | **~$1.05**, or ~$1.25 with an ALB, plus Bedrock usage |
 

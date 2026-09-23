@@ -119,6 +119,18 @@ Phase 1 established the pattern for any pod that calls AWS:
   every region the profile routes to.
 - **No LiteLLM master key and no ingress, or both.** Never an ingress without
   the key.
+- **The Anthropic API key is the one static credential, and it is handled like
+  the envelope's secrets.** It exists only as the in-cluster Secret
+  `litellm-anthropic`, written by `make litellm-key` from a hidden prompt. Never
+  a Tofu variable or `kubernetes_secret_v1` (that puts it in S3 state, and
+  bucket versioning keeps it forever), never a ConfigMap, never `kubectl apply`
+  (that copies it into an annotation), never an argv. The Deployment references
+  it `optional: true`; keep it that way, so a session without the key still
+  has a working Bedrock path. If this ever needs to survive teardown, the
+  answer is Secrets Manager in `tofu-account/` with the value set by hand -
+  not moving it into `tofu/`.
+- **The fallback raises the stakes of an unauthenticated gateway:** a caller
+  can now spend on the Anthropic account, which the AWS Budget does not see.
 - **A chart that creates its own ServiceAccount keeps it** (phase 2's
   aws-load-balancer-controller): the role ARN is a Helm value in Tofu, still
   never a manifest in git. Tofu only creates the SA itself when nothing else

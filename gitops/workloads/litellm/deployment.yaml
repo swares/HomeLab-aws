@@ -21,7 +21,7 @@ spec:
         app.kubernetes.io/name: litellm
       annotations:
         # Roll the pod when the model config changes.
-        config-version: "1"
+        config-version: "2"
     spec:
       serviceAccountName: litellm
       # LiteLLM never calls the Kubernetes API, so no in-cluster API token.
@@ -44,6 +44,17 @@ spec:
               value: us-east-1
             - name: AWS_STS_REGIONAL_ENDPOINTS
               value: regional
+            # Direct-API fallback key. The Secret is NOT in git and NOT in Tofu:
+            # `make litellm-key` prompts for it and creates it in-cluster, and it
+            # dies with the cluster nightly. optional: true so the pod starts
+            # without it - Bedrock works, only the fallback fails. Argo does not
+            # prune it: Argo only prunes objects it created.
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-anthropic
+                  key: api-key
+                  optional: true
           volumeMounts:
             - name: config
               mountPath: /etc/litellm
