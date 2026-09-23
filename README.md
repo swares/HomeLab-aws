@@ -38,9 +38,10 @@ one `tofu destroy` leaves no trace on either side.
 | `gitops/apps/` | App-of-apps children (Argo `Application` objects) |
 | `gitops/workloads/` | Manifests the Applications point at |
 | `gitops/bootstrap/` | Reference copy of the root Application (the live one is in `tofu/argocd.tf`) |
-| `scripts/` | `eks-teardown.sh` (ordered teardown), `install-teardown-timer.sh` (sets up the 02:00 timer on n150-2), `print-aws-envelope.sh` |
+| `scripts/` | `eks-teardown.sh` (ordered teardown), `install-teardown-timer.sh` (sets up the 02:00 timer on n150-2), `print-aws-envelope.sh`, `backlog-audit.py` (vendored from the lab) |
 | `systemd/` | Nightly teardown timer (runs on `n150-2`) |
 | `docs/BREAK-GLASS.md` | AWS lockout envelope — prompted, printed, stored off-site |
+| `BACKLOG.md` | Open work **outside** the roadmap: account issues, AWS requests, hygiene. `make backlog` audits it |
 | `CLAUDE.md` | Operating rules — read before touching anything |
 
 ## Quickstart
@@ -117,6 +118,9 @@ from $73/mo to about $438/mo. Both numbers are why the nightly timer exists.
 Lead-time items to start before phase 3: the **G-instance service quota**
 (often 0 vCPUs on new accounts — a hard block, and the increase can take days)
 and **Bedrock model access**, which is granted per-model per-region.
+
+Work that is not a phase (account problems, quota requests, hygiene) is tracked
+in [`BACKLOG.md`](BACKLOG.md), not here.
 
 ## Relationship to the lab
 

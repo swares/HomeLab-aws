@@ -244,6 +244,15 @@ configuration syntax — the `kubernetes` block became an attribute and `set`
 blocks became a list. `tofu/argocd.tf` is written for 2.x. Bumping it is a real
 edit, not a version bump.
 
+## Open work lives in BACKLOG.md
+
+The README roadmap holds the phases; `BACKLOG.md` holds everything else. Do not
+start a TODO list in another file, a PR description or a code comment. Add a
+`### N.M` entry with checkboxes there instead. When you close something, tick
+it, and only then strike through the heading and mark it **DONE**. `make backlog`
+fails on an open box under a DONE heading (`--max-orphans 0`) and on any item
+without a checkbox or an owning entry. Run it before any PR that touches the file.
+
 ## How changes are made
 
 - Edit HCL or `gitops/`, open a PR. Argo reconciles `gitops/` with `selfHeal`
