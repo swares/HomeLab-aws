@@ -1,13 +1,31 @@
-# LiteLLM routing config. One model, one route.
+# LiteLLM routing config. One client-facing model, two backends.
 #
-# `model_name` is what clients ask for (OpenAI-style). `model` is the Bedrock
-# target: the US INFERENCE PROFILE ID, not the bare model ID - in us-east-1
-# bedrock-runtime rejects the bare ID for on-demand calls.
+# Clients ask for `claude-haiku` (OpenAI-style `model_name`). LiteLLM sends it
+# to Bedrock first; if Bedrock fails - most likely a 429 while the account's
+# Haiku quota is still at its new-account default - it retries the same
+# request against the Anthropic API directly (`claude-haiku-direct`).
 #
-# No credentials here, and none anywhere: boto3 inside LiteLLM finds
-# AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE (injected by EKS because of the
-# ServiceAccount's role annotation) and exchanges the pod's token for
-# temporary credentials. That is IRSA; see tofu/litellm.tf.
+# THE MODEL IS DECLARED IN THREE PLACES and they move together:
+#   - here, twice: the Bedrock inference profile ID and the Anthropic API ID
+#   - tofu/litellm.tf `bedrock_model_id` (the IAM policy's resource ARNs)
+#   - docs/RUNBOOK.md (the admin first-call, by Bedrock ID)
+# Changing only this file gets you AccessDenied on the Bedrock half, which
+# LiteLLM then silently papers over with the fallback. `make litellm-smoke`
+# prints which backend answered, so look at it after any model change.
+#
+# Bedrock: the US INFERENCE PROFILE ID, not the bare model ID - in us-east-1
+# bedrock-runtime rejects the bare ID for on-demand calls. No AWS credentials
+# anywhere: boto3 finds AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE (injected by
+# EKS because of the ServiceAccount's role annotation). That is IRSA; see
+# tofu/litellm.tf.
+#
+# Anthropic direct: the ONE static credential in this repo's design. It is
+# never in git, Tofu state, or on disk: `make litellm-key` prompts for it and
+# writes it straight into the Secret `litellm-anthropic`, which dies with the
+# cluster every night. The Deployment marks that Secret optional, so without
+# `make litellm-key` the pod still starts, Bedrock still works, and only the
+# fallback fails. `os.environ/` is resolved when LiteLLM starts, so a key added
+# later needs a pod restart - `make litellm-key` does that.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,12 +38,30 @@ data:
         litellm_params:
           model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
           aws_region_name: us-east-1
+        model_info:
+          # Returned in the x-litellm-model-id response header, which is how
+          # `make litellm-smoke` reports which backend served the request.
+          id: bedrock-haiku
+
+      - model_name: claude-haiku-direct
+        litellm_params:
+          model: anthropic/claude-haiku-4-5-20251001
+          api_key: os.environ/ANTHROPIC_API_KEY
+        model_info:
+          id: anthropic-haiku
 
     litellm_settings:
       # Never send prompt/response bodies to any callback or log sink.
       turn_off_message_logging: true
       drop_params: true
+      # One retry on Bedrock before falling back, not the default three: a
+      # zero/low quota is not transient, and each retry is added latency.
+      num_retries: 1
+      fallbacks:
+        - claude-haiku: ["claude-haiku-direct"]
 
     # No general_settings.master_key yet, deliberately: the Service is
     # ClusterIP and reachable only by port-forward. Phase 2 adds ingress and
-    # a master key TOGETHER - never one without the other.
+    # a master key TOGETHER - never one without the other. The fallback raises
+    # the stakes: an unauthenticated caller can now spend on the Anthropic
+    # account, not just Bedrock quota.

@@ -228,6 +228,45 @@ a Kubernetes-issued token, and no AWS key of any kind.
 | Smoke test: mentions the use-case form or Marketplace | Prerequisite 1 or 2 hasn't been done |
 | Any Bedrock call, from **any** identity and **any** model (including Amazon Nova), fails `ValidationException: Error 002: Access to Bedrock models is not allowed for this account` | Not IAM and not model access - the whole account is restricted. Seen 2026-09-22 after a credit card on the account expired. Fix the payment method in the Billing console; if that doesn't clear it within a day, open a free **Account and billing** support case. `aws freetier get-account-plan-state` returning `FREE` instead means the account needs upgrading to the paid plan |
 
+### Direct-API fallback (while the Bedrock quota is low)
+
+A new account's Bedrock quota for Haiku 4.5 is small, and AWS Support denied an
+increase on 2026-09-23 pending usage history (case 179010504900511: "use the
+current capacity, re-submit after a billing cycle"). So `claude-haiku` in
+LiteLLM tries Bedrock first and, on failure, retries the same request against
+the Anthropic API as `claude-haiku-direct`. Clients do not change.
+
+The Anthropic key is the **one static credential** in this design. It is
+prompted for and written straight into an in-cluster Secret; it never touches
+git, Tofu state, or disk, and it dies with the cluster. So, once per `eks-up`:
+
+```bash
+make litellm-key                              # prompts (hidden), creates Secret, restarts the pod
+make fallback-check                           # Secret exists, pod has it, ConfigMap and git do not
+make litellm-smoke                            # prints which backend answered
+make litellm-smoke LITELLM_MODEL=claude-haiku-direct   # the fallback path alone
+```
+
+`litellm-smoke` prints `x-litellm-model-id` (`bedrock-haiku` or
+`anthropic-haiku`) and `x-litellm-attempted-fallbacks`. If it says
+`anthropic-haiku` with `attempted-fallbacks: 1`, Bedrock failed and the
+fallback served the request - look at the pod log for why before assuming it
+was quota. A wrong IAM policy looks identical from the client side.
+
+Skipping `make litellm-key` is safe: the Secret is `optional`, the pod starts,
+Bedrock works, and only the fallback fails with `401 Missing Anthropic API Key`.
+
+**Removing it** when the quota comes through: delete the `claude-haiku-direct`
+entry and `fallbacks` from the ConfigMap, the `ANTHROPIC_API_KEY` env from the
+Deployment, and the two Make targets. Nothing in Tofu or `tofu-account/`
+changed, so nothing there to undo.
+
+| Symptom | Cause |
+|---|---|
+| `401 Missing Anthropic API Key` after Bedrock fails | `make litellm-key` not run this session, or the pod started before the Secret existed (the target restarts it) |
+| `anthropic-haiku` serves every request | Bedrock is failing every time. `kubectl -n litellm logs deploy/litellm` - `ThrottlingException` is quota; `AccessDenied` is IAM (`tofu/litellm.tf`) |
+| `404 not_found_error` from Anthropic | The Anthropic model ID in the ConfigMap is wrong; it is not the Bedrock ID |
+
 ## Phase 2: ingress via the AWS Load Balancer Controller
 
 The controller watches Ingress objects and creates a real ALB for each one -

@@ -1,6 +1,6 @@
 # Convenience targets for the EKS sandbox. Mirrors the conventions in
 # swares/HomeLab: `make help` greps the ## comments.
-.PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui litellm-wait litellm-smoke irsa-check alb-check cost fmt validate \
+.PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui litellm-wait litellm-smoke litellm-key fallback-check irsa-check alb-check cost fmt validate \
         account-init account-plan account-apply
 
 # Recipes use bash features ([[ ]]); /bin/sh on Debian is dash.
@@ -21,6 +21,11 @@ EKS_KUBECONFIG ?= $(HOME)/.kube/eks-sandbox
 # (root app -> litellm app -> manifests). The phase-1 targets wait rather than
 # failing with "deployments.apps \"litellm\" not found".
 LITELLM_WAIT ?= 300
+
+# Which LiteLLM model group `litellm-smoke` asks for. `claude-haiku` is the
+# client-facing name (Bedrock, falling back to the Anthropic API);
+# `claude-haiku-direct` hits the fallback backend alone.
+LITELLM_MODEL ?= claude-haiku
 
 help:        ## Show this help
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t-/' | sort
@@ -72,13 +77,43 @@ litellm-wait:  ## Phase 1: wait for Argo to create the litellm Deployment, then 
 	  done
 	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm rollout status deploy/litellm --timeout=180s
 
-litellm-smoke: litellm-wait ## Phase 1: one real Claude call through LiteLLM (port-forward, curl, clean up)
+litellm-smoke: litellm-wait ## Phase 1: one real Claude call through LiteLLM; prints which backend served it
 	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm port-forward svc/litellm 4000:4000 >/dev/null 2>&1 & \
-	  pf=$$!; trap "kill $$pf 2>/dev/null" EXIT; sleep 3; \
-	  curl -fsS http://localhost:4000/v1/chat/completions \
+	  pf=$$!; hdr=$$(mktemp); trap "kill $$pf 2>/dev/null; rm -f $$hdr" EXIT; sleep 3; \
+	  curl -fsS -D "$$hdr" http://localhost:4000/v1/chat/completions \
 	    -H 'Content-Type: application/json' \
-	    -d '{"model":"claude-haiku","max_tokens":40,"messages":[{"role":"user","content":"Reply with exactly: IRSA works"}]}' \
-	  | python3 -c 'import json,sys; r=json.load(sys.stdin); print("model:", r["model"]); print("reply:", r["choices"][0]["message"]["content"])'
+	    -d '{"model":"$(LITELLM_MODEL)","max_tokens":40,"messages":[{"role":"user","content":"Reply with exactly: gateway works"}]}' \
+	  | python3 -c 'import json,sys; r=json.load(sys.stdin); print("model:", r["model"]); print("reply:", r["choices"][0]["message"]["content"])'; \
+	  echo "backend (bedrock-haiku | anthropic-haiku) and fallbacks attempted:"; \
+	  grep -iE '^x-litellm-(model-id|attempted-fallbacks):' "$$hdr" | tr -d '\r' | sed 's/^/  /'
+
+# The fallback key is the one static credential in this design. Prompted,
+# never read from disk, never an argv (printf is a bash builtin, so the key is
+# not visible in `ps`), never `kubectl apply` (that would copy it into the
+# last-applied-configuration annotation). It lives only as an in-cluster
+# Secret and dies with the cluster, so this runs once per `eks-up`.
+litellm-key: litellm-wait ## Fallback: prompt for the Anthropic API key, store it as an in-cluster Secret, restart LiteLLM
+	@read -rsp "Anthropic API key (input hidden): " key; echo; \
+	  if [[ "$$key" != sk-ant-* ]]; then unset key; echo "FAIL: that does not look like an Anthropic API key"; exit 1; fi; \
+	  KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm delete secret litellm-anthropic --ignore-not-found >/dev/null; \
+	  printf '%s' "$$key" | KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm create secret generic litellm-anthropic \
+	    --from-file=api-key=/dev/stdin >/dev/null; \
+	  rc=$$?; unset key; [[ $$rc -eq 0 ]] && echo "OK: secret litellm-anthropic written" || exit $$rc
+	@# os.environ/ is resolved at LiteLLM startup: a new key needs a new pod.
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm rollout restart deploy/litellm
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm rollout status deploy/litellm --timeout=180s
+
+fallback-check: litellm-wait ## Fallback: key present in-cluster only - never in the ConfigMap or git
+	@if KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm get secret litellm-anthropic >/dev/null 2>&1; then \
+	  echo "OK: secret litellm-anthropic exists"; \
+	else echo "INFO: no secret litellm-anthropic - run 'make litellm-key' (Bedrock still works; the fallback will 401)"; fi
+	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm exec deploy/litellm -- \
+	  sh -c 'if [ -n "$$ANTHROPIC_API_KEY" ]; then echo "OK: pod has ANTHROPIC_API_KEY ($${#ANTHROPIC_API_KEY} chars)"; \
+	         else echo "INFO: pod has no ANTHROPIC_API_KEY - run make litellm-key (it restarts the pod)"; fi'
+	@if KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm get configmap litellm-config -o yaml | grep -q 'sk-ant-'; then \
+	  echo "FAIL: key material in the ConfigMap"; exit 1; else echo "OK: ConfigMap holds no key"; fi
+	@if git grep -qE 'sk-ant-[A-Za-z0-9]'; then echo "FAIL: key material committed to git"; exit 1; \
+	  else echo "OK: no key in git"; fi
 
 irsa-check: litellm-wait ## Phase 1: prove the pod has web-identity creds and NO static keys
 	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm exec deploy/litellm -- \
