@@ -89,38 +89,81 @@ done
 # This is the step that makes the whole script worth having. Kubernetes
 # reports the object gone well before the AWS-side ALB/NLB is deleted.
 log "Waiting up to ${LB_WAIT_SECONDS}s for AWS load balancers to disappear..."
-vpc_id="$(aws ec2 describe-vpcs --region "$REGION" \
-  --filters "Name=tag:Name,Values=${CLUSTER_NAME}" \
-  --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")"
+deadline=$(( SECONDS + LB_WAIT_SECONDS ))
 
-if [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
-  deadline=$(( SECONDS + LB_WAIT_SECONDS ))
+# Same rule for the VPC lookup: an error used to become "None", which skipped
+# the whole wait. Retry within the same deadline; "None" now only ever means
+# AWS answered and there is no such VPC.
+AWS_ERR="$(mktemp)"
+trap 'rm -f "$KUBECONFIG_FILE" "$AWS_ERR"' EXIT
+while :; do
+  if vpc_id="$(aws ec2 describe-vpcs --region "$REGION" \
+      --filters "Name=tag:Name,Values=${CLUSTER_NAME}" \
+      --query 'Vpcs[0].VpcId' --output text 2>"$AWS_ERR")"; then
+    break
+  fi
+  err="$(tr '\n' ' ' < "$AWS_ERR")"
+  log "  query failed (ec2 describe-vpcs): ${err:0:300}" >&2
+  if (( SECONDS >= deadline )); then vpc_id="?"; break; fi
+  sleep 15
+done
+
+# A failed query must never read as "0 remaining". Each count comes back as a
+# number or "?"; "?" counts as still present, so a throttled call, an expired
+# credential or a missing permission holds the wait (up to LB_WAIT_SECONDS)
+# instead of waving teardown through to a DependencyViolation. The error goes
+# to stderr, so the nightly run's journal says which call failed and why.
+# stderr goes to a file, not into the answer: a harmless CLI warning must not
+# turn a good "0" into a failure.
+count_of() {
+  local out err
+  if out="$("$@" --output text 2>"$AWS_ERR")" && [[ "$out" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$out"
+  else
+    err="$(tr '\n' ' ' < "$AWS_ERR")"
+    log "  query failed ($2 $3): ${err:0:300}${out:+ / output: ${out:0:100}}" >&2
+    printf '?'
+  fi
+}
+
+if [[ "$vpc_id" == "?" ]]; then
+  log "WARN: could not look up the VPC for ${LB_WAIT_SECONDS}s, so could not wait for its load balancers."
+  log "WARN: destroying anyway (stopping the billing comes first); it may fail on DependencyViolation. See docs/RUNBOOK.md."
+elif [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
+  clear=false
   while (( SECONDS < deadline )); do
-    count="$(aws elbv2 describe-load-balancers --region "$REGION" \
-      --query "length(LoadBalancers[?VpcId=='${vpc_id}'])" --output text 2>/dev/null || echo 0)"
-    classic="$(aws elb describe-load-balancers --region "$REGION" \
-      --query "length(LoadBalancerDescriptions[?VPCId=='${vpc_id}'])" --output text 2>/dev/null || echo 0)"
+    count="$(count_of aws elbv2 describe-load-balancers --region "$REGION" \
+      --query "length(LoadBalancers[?VpcId=='${vpc_id}'])")"
+    classic="$(count_of aws elb describe-load-balancers --region "$REGION" \
+      --query "length(LoadBalancerDescriptions[?VPCId=='${vpc_id}'])")"
     # The ENIs, not the load balancer record, are what fails the VPC delete.
     # AWS drops a deleted ALB from DescribeLoadBalancers within seconds while
     # its interfaces detach for a while longer; on 2026-09-22 this loop said
     # "none remain" 3s after the Ingress went, and only the minutes spent
     # deleting the cluster and nodegroup covered the difference. ELB-owned
     # interfaces are the ones whose Description starts "ELB ".
-    enis="$(aws ec2 describe-network-interfaces --region "$REGION" \
+    enis="$(count_of aws ec2 describe-network-interfaces --region "$REGION" \
       --filters "Name=vpc-id,Values=${vpc_id}" \
-      --query "length(NetworkInterfaces[?starts_with(Description, 'ELB ')])" \
-      --output text 2>/dev/null || echo 0)"
+      --query "length(NetworkInterfaces[?starts_with(Description, 'ELB ')])")"
     if [[ "$count" == "0" && "$classic" == "0" && "$enis" == "0" ]]; then
       log "No load balancers or ELB interfaces remain in ${vpc_id}."
+      clear=true
       break
     fi
-    log "  ${count} v2 + ${classic} classic LBs, ${enis} ELB interfaces; waiting..."
+    note=""; [[ "$count$classic$enis" == *'?'* ]] && note=" ('?' = query failed, treated as present)"
+    log "  ${count} v2 + ${classic} classic LBs, ${enis} ELB interfaces${note}; waiting..."
     sleep 15
   done
-  if (( SECONDS >= deadline )); then
-    log "WARN: load balancers or their interfaces still present after ${LB_WAIT_SECONDS}s."
-    log "WARN: destroy may fail on DependencyViolation. See docs/RUNBOOK.md."
+  if [[ "$clear" != true ]]; then
+    log "WARN: after ${LB_WAIT_SECONDS}s: ${count} v2 + ${classic} classic LBs, ${enis} ELB interfaces."
+    [[ "$count$classic$enis" == *'?'* ]] && \
+      log "WARN: at least one query was still failing - see the 'query failed' lines above."
+    log "WARN: destroying anyway (stopping the billing comes first); it may fail on DependencyViolation. See docs/RUNBOOK.md."
   fi
+else
+  # Unchanged behaviour, made visible: no tagged VPC means Tofu never got as
+  # far as creating one, or it is already gone.
+  log "No VPC tagged ${CLUSTER_NAME}; nothing to wait for."
 fi
 
 # --- 5. Destroy ------------------------------------------------------------

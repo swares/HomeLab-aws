@@ -372,7 +372,12 @@ Clean up the test objects afterwards if you are not tearing down:
 What the wait actually checks: load balancers **and** ELB-owned network
 interfaces in the VPC. A deleted ALB leaves `DescribeLoadBalancers` within
 seconds, but its ENIs linger, and those are what fail the VPC delete. Tune the
-ceiling with `LB_WAIT_SECONDS` (default 300) if a teardown ever warns.
+ceiling with `LB_WAIT_SECONDS` (default 300) if a teardown ever warns. A
+`query failed (…)` line in the journal means an AWS call errored. The wait
+treats that as "still present" and holds until the deadline, so a teardown that
+takes the full 5 minutes and then warns is usually a credential or IAM problem
+for `lab-teardown`, not a slow load balancer. The error text on that line says
+which.
 
 Both queries must come back empty. If they don't, the resources are billing:
 delete them by hand (see "Destroy fails with `DependencyViolation`" below) and
