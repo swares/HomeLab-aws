@@ -77,13 +77,28 @@ litellm-wait:  ## Phase 1: wait for Argo to create the litellm Deployment, then 
 	  done
 	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm rollout status deploy/litellm --timeout=180s
 
+# Port-forwards to a FREE local port, never a fixed 4000: a leftover
+# port-forward (from a manual test, or pointing at a pod that has since been
+# replaced) would otherwise hold 4000, ours would fail to bind silently, and
+# curl would hit the stale one - "Empty reply from server". On a non-200 it
+# prints the HTTP status and LiteLLM's error message, not a JSON traceback.
 litellm-smoke: litellm-wait ## Phase 1: one real Claude call through LiteLLM; prints which backend served it
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm port-forward svc/litellm 4000:4000 >/dev/null 2>&1 & \
-	  pf=$$!; hdr=$$(mktemp); trap "kill $$pf 2>/dev/null; rm -f $$hdr" EXIT; sleep 3; \
-	  curl -fsS -D "$$hdr" http://localhost:4000/v1/chat/completions \
+	@port=$$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'); \
+	  KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm port-forward svc/litellm $$port:4000 >/dev/null 2>&1 & \
+	  pf=$$!; hdr=$$(mktemp); body=$$(mktemp); trap "kill $$pf 2>/dev/null; rm -f $$hdr $$body" EXIT; \
+	  for i in $$(seq 1 30); do \
+	    kill -0 $$pf 2>/dev/null || { echo "FAIL: kubectl port-forward exited before it was ready"; exit 1; }; \
+	    (exec 3<>/dev/tcp/127.0.0.1/$$port) 2>/dev/null && break; sleep 0.5; \
+	  done; \
+	  code=$$(curl -sS -o "$$body" -D "$$hdr" -w '%{http_code}' http://127.0.0.1:$$port/v1/chat/completions \
 	    -H 'Content-Type: application/json' \
-	    -d '{"model":"$(LITELLM_MODEL)","max_tokens":40,"messages":[{"role":"user","content":"Reply with exactly: gateway works"}]}' \
-	  | python3 -c 'import json,sys; r=json.load(sys.stdin); print("model:", r["model"]); print("reply:", r["choices"][0]["message"]["content"])'; \
+	    -d '{"model":"$(LITELLM_MODEL)","max_tokens":40,"messages":[{"role":"user","content":"Reply with exactly: gateway works"}]}'); \
+	  if [[ "$$code" != 200 ]]; then \
+	    echo "FAIL: HTTP $$code from LiteLLM (model group $(LITELLM_MODEL))"; \
+	    python3 -c 'import json,sys; print(json.load(sys.stdin)["error"]["message"][:1500])' < "$$body" 2>/dev/null \
+	      || head -c 1500 "$$body"; echo; exit 1; \
+	  fi; \
+	  python3 -c 'import json,sys; r=json.load(sys.stdin); print("model:", r["model"]); print("reply:", r["choices"][0]["message"]["content"])' < "$$body"; \
 	  echo "backend (bedrock-haiku | anthropic-haiku) and fallbacks attempted:"; \
 	  grep -iE '^x-litellm-(model-id|attempted-fallbacks):' "$$hdr" | tr -d '\r' | sed 's/^/  /'
 
@@ -92,9 +107,16 @@ litellm-smoke: litellm-wait ## Phase 1: one real Claude call through LiteLLM; pr
 # not visible in `ps`), never `kubectl apply` (that would copy it into the
 # last-applied-configuration annotation). It lives only as an in-cluster
 # Secret and dies with the cluster, so this runs once per `eks-up`.
+# Run it ON ITS OWN LINE. It reads the key from the terminal, so in a pasted
+# multi-line block it swallows the next pasted line as the "key".
+# Only standard API keys (sk-ant-api...) can call the Messages API. Admin keys
+# (sk-ant-admin...) and OAuth tokens (sk-ant-oat...) start with sk-ant- too, and
+# used to be accepted here and then fail later as "401 API key is invalid".
 litellm-key: litellm-wait ## Fallback: prompt for the Anthropic API key, store it as an in-cluster Secret, restart LiteLLM
 	@read -rsp "Anthropic API key (input hidden): " key; echo; \
-	  if [[ "$$key" != sk-ant-* ]]; then unset key; echo "FAIL: that does not look like an Anthropic API key"; exit 1; fi; \
+	  if [[ "$$key" =~ [[:space:]] ]]; then unset key; echo "FAIL: key contains whitespace - paste only the key"; exit 1; fi; \
+	  if [[ "$$key" != sk-ant-api* ]]; then unset key; \
+	    echo "FAIL: not a standard Anthropic API key (sk-ant-api...). Admin keys and OAuth tokens cannot call the Messages API."; exit 1; fi; \
 	  KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm delete secret litellm-anthropic --ignore-not-found >/dev/null; \
 	  printf '%s' "$$key" | KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm create secret generic litellm-anthropic \
 	    --from-file=api-key=/dev/stdin >/dev/null; \
@@ -106,7 +128,7 @@ litellm-key: litellm-wait ## Fallback: prompt for the Anthropic API key, store i
 fallback-check: litellm-wait ## Fallback: key present in-cluster only - never in the ConfigMap or git
 	@if KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm get secret litellm-anthropic >/dev/null 2>&1; then \
 	  echo "OK: secret litellm-anthropic exists"; \
-	else echo "INFO: no secret litellm-anthropic - run 'make litellm-key' (Bedrock still works; the fallback will 401)"; fi
+	else echo "INFO: no secret litellm-anthropic - run 'make litellm-key' (without it claude-haiku has no fallback; while the account has Bedrock Error 002 it cannot answer at all)"; fi
 	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm exec deploy/litellm -- \
 	  sh -c 'if [ -n "$$ANTHROPIC_API_KEY" ]; then echo "OK: pod has ANTHROPIC_API_KEY ($${#ANTHROPIC_API_KEY} chars)"; \
 	         else echo "INFO: pod has no ANTHROPIC_API_KEY - run make litellm-key (it restarts the pod)"; fi'

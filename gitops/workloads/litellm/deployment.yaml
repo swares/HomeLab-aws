@@ -47,7 +47,7 @@ spec:
             # Direct-API fallback key. The Secret is NOT in git and NOT in Tofu:
             # `make litellm-key` prompts for it and creates it in-cluster, and it
             # dies with the cluster nightly. optional: true so the pod starts
-            # without it - Bedrock works, only the fallback fails. Argo does not
+            # without it - the Bedrock path is unaffected, only the fallback fails. Argo does not
             # prune it: Argo only prunes objects it created.
             - name: ANTHROPIC_API_KEY
               valueFrom:
