@@ -1,7 +1,7 @@
 # Convenience targets for the EKS sandbox. Mirrors the conventions in
 # swares/HomeLab: `make help` greps the ## comments.
 .PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui litellm-wait litellm-smoke litellm-key fallback-check irsa-check alb-check cost fmt validate \
-        account-init account-plan account-apply
+        account-init account-plan account-apply backlog
 
 # Recipes use bash features ([[ ]]); /bin/sh on Debian is dash.
 SHELL     := /bin/bash
@@ -160,6 +160,9 @@ cost:        ## Month-to-date spend
 		--time-period Start=$$(date -u +%Y-%m-01),End=$$(date -u +%Y-%m-%d) \
 		--granularity MONTHLY --metrics UnblendedCost \
 		--query 'ResultsByTime[0].Total.UnblendedCost.Amount' --output text
+
+backlog:     ## Audit BACKLOG.md bookkeeping (no untrackable items, no open boxes under a DONE heading)
+	python3 scripts/backlog-audit.py --strict --max-orphans 0
 
 fmt:         ## Format HCL
 	cd $(TOFU_DIR) && $(TOFU) fmt -recursive
