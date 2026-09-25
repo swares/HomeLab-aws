@@ -26,6 +26,12 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = ">= 2.36, < 3.0"
     }
+    # For the LiteLLM master key (litellm.tf): a random value per cluster.
+    # No AWS resource, nothing for the teardown policy to cover.
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 

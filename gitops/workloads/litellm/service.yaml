@@ -1,7 +1,7 @@
-# ClusterIP ONLY. Not LoadBalancer, not an Ingress: either would create AWS
-# load balancers outside tofu's knowledge (see scripts/eks-teardown.sh) and
-# expose an unauthenticated LLM gateway. Reach it with `make litellm-smoke`
-# or a port-forward. Phase 2 changes this, with auth.
+# ClusterIP. Never type LoadBalancer: that would create an NLB with none of
+# the Ingress's safeguards. Outside access goes ONLY through ingress.yaml (an
+# ALB limited to alb_allowed_cidrs and to /v1, with the master key required).
+# In-cluster and port-forward access (`make litellm-smoke`) still come here.
 apiVersion: v1
 kind: Service
 metadata:

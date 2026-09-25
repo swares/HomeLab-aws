@@ -76,7 +76,7 @@ stop it.
 | Argo CD | `argocd` | Installed by Tofu, not by itself. Dies with the cluster. |
 | Kyverno | `kyverno` | Helm chart, sync-wave -1 |
 | Kyverno policies | `kyverno` | Three ClusterPolicies vendored from HomeLab, sync-wave 0 |
-| LiteLLM | `litellm` | Phase 1. OpenAI-compatible gateway to Claude Haiku 4.5 on Bedrock, sync-wave 1. **No AWS keys**: the pod gets credentials through IRSA. Falls back to the Anthropic API directly while the Bedrock quota is low; that key is prompted per session by `make litellm-key` and never in git or Tofu. ClusterIP only |
+| LiteLLM | `litellm` | Phase 1. OpenAI-compatible gateway to Claude Haiku 4.5 on Bedrock, sync-wave 1. **No AWS keys**: the pod gets credentials through IRSA. Falls back to the Anthropic API directly while Bedrock is unavailable; that key is prompted per session by `make litellm-key` and never in git or Tofu. Phase 2a: reachable through the ALB at `/v1` only, from `alb_allowed_cidrs` only, with a per-cluster master key (`make litellm-url`) |
 | AWS Load Balancer Controller | `kube-system` | Phase 2. Installed by Tofu. Turns Ingress objects into real ALBs - resources Tofu has no record of, which is why teardown is ordered |
 
 The ALB's allowed source CIDR is **not in this repo**: Tofu builds the
@@ -99,7 +99,7 @@ it are created and destroyed together.
 | NAT Gateway | **not created** | $0.00 |
 | Bedrock, Claude Haiku 4.5 | per token | cents for a session of testing |
 | Anthropic API, Claude Haiku 4.5 (fallback) | per token, billed by Anthropic | cents; only when Bedrock fails. Not in the AWS Budget |
-| Application Load Balancer | ~$0.023/hr + LCUs | ~$0.20 (phase 2, only while an Ingress exists) |
+| Application Load Balancer | ~$0.023/hr + LCUs | ~$0.20 (every session since phase 2a: the LiteLLM Ingress) |
 | **Total** | | **~$1.05**, or ~$1.25 with an ALB, plus Bedrock usage |
 
 Left running for a month, the same cluster is roughly **$85**. If the
@@ -112,7 +112,7 @@ from $73/mo to about $438/mo. Both numbers are why the nightly timer exists.
 |---|---|---|
 | 0 | Create/destroy loop, self-bootstrapping Argo, Kyverno baseline, nightly teardown timer | done (break-glass Drill A outstanding) |
 | 1 | LiteLLM → Bedrock via **IRSA** (the core EKS lesson) | done - IRSA proven end to end. Bedrock itself is blocked account-wide (RUNBOOK, Error 002); Claude is served through the direct-API fallback, verified 2026-09-23 |
-| 2 | ALB controller and ingress, then the m5stack-adapter behind it, self-contained (a stub receiver stands in for the device - nothing reaches the lab) | controller in progress |
+| 2 | ALB controller and ingress, then the m5stack-adapter behind it, self-contained (a stub receiver stands in for the device - nothing reaches the lab) | in progress: controller and teardown with a live ALB done; **2a** LiteLLM behind the ALB with a master key; **2b** adapter + stub next |
 | 3 | Karpenter + GPU spot nodes; Whisper large-v3 batch | not started |
 
 Lead-time items to start before phase 3: the **G-instance service quota**

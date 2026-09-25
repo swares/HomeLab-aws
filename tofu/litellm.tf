@@ -120,6 +120,47 @@ resource "kubernetes_service_account_v1" "litellm" {
   }
 }
 
+# --- The master key (phase 2a) ----------------------------------------------
+#
+# The Ingress makes LiteLLM reachable from outside the cluster, so it gets a
+# master key in the same change - never one without the other (CLAUDE.md).
+#
+# WHY THIS ONE MAY LIVE IN TOFU STATE when the Anthropic key may not: it is
+# not a credential anyone issued us. It is a random value minted per cluster,
+# it guards only this cluster's gateway, and it is destroyed with the cluster
+# every night - random_password goes in the same destroy, so the next eks-up
+# mints a new one. The copies that S3 versioning keeps open nothing. A
+# long-lived credential in state would stay valid; this one cannot.
+#
+# FAIL-CLOSED: the Deployment references this Secret WITHOUT `optional`. With
+# the env var unset, LiteLLM starts with no auth at all (verified on v1.101.0),
+# so a missing key must stop the pod, not open the gateway. Tofu creates the
+# Secret before Argo's root app exists, so in normal operation it is always
+# there first.
+#
+# LiteLLM requires master keys to start with "sk-". No special characters, so
+# the value is safe in a header, a shell variable and a URL-less curl line.
+resource "random_password" "litellm_master_key" {
+  length  = 48
+  special = false
+}
+
+resource "kubernetes_secret_v1" "litellm_master_key" {
+  metadata {
+    name      = "litellm-master-key"
+    namespace = kubernetes_namespace_v1.litellm.metadata[0].name
+  }
+
+  data = {
+    "master-key" = "sk-${random_password.litellm_master_key.result}"
+  }
+
+  # Reverse-order destroy: keep lab-teardown's cluster access until this is
+  # gone. The namespace already carries this edge; stated here too so the rule
+  # holds even if the namespace reference changes (CLAUDE.md).
+  depends_on = [aws_eks_access_policy_association.teardown]
+}
+
 output "litellm_role_arn" {
   value = aws_iam_role.litellm.arn
 }

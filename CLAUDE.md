@@ -118,7 +118,20 @@ Phase 1 established the pattern for any pod that calls AWS:
   bare model IDs. The IAM policy must allow the profile *and* the model in
   every region the profile routes to.
 - **No LiteLLM master key and no ingress, or both.** Never an ingress without
-  the key.
+  the key. Phase 2a added both together: `gitops/workloads/litellm/ingress.yaml`
+  and the Tofu-created Secret `litellm-master-key`.
+- **The master key Secret is required, never `optional`.** With
+  `LITELLM_MASTER_KEY` unset, LiteLLM starts with no auth at all (verified on
+  v1.101.0). A missing Secret must stop the pod, not open the gateway.
+- **The LiteLLM Ingress routes `/v1` only.** The admin UI, API docs and
+  management routes live at other paths and stay inside the cluster. Widening
+  the path is a security change, not a convenience.
+- **Two kinds of secret, two rules.** A *credential someone issued us* (the
+  Anthropic key, any IAM access key) stays valid after teardown, so it never
+  goes in Tofu state. A *random value minted per cluster* (the LiteLLM master
+  key, `random_password` in `tofu/litellm.tf`) is destroyed with the cluster
+  and opens nothing afterwards, so state is acceptable. If a value would still
+  work tomorrow, it is the first kind.
 - **The Anthropic API key is the one static credential, and it is handled like
   the envelope's secrets.** It exists only as the in-cluster Secret
   `litellm-anthropic`, written by `make litellm-key` from a hidden prompt. Never

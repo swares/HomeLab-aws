@@ -64,9 +64,10 @@ cluster-admin to root alone.
 ### 1.3 Anthropic spend is invisible to the AWS Budget — **open**
 
 The direct-API fallback bills the Anthropic account, which `tofu-account/`'s
-budget cannot see. While 1.1 lasts, that is all Claude spend. The LiteLLM
-Service has no master key (phase 2 adds it with the Ingress), so anything
-in-cluster can spend.
+budget cannot see. While 1.1 lasts, that is all Claude spend. Since phase 2a
+LiteLLM requires a per-cluster master key and is reachable from outside only
+from `alb_allowed_cidrs`, so spend needs the key. The limit below is the
+backstop for a leaked key or a runaway client, not the first line.
 
 - [ ] Monthly spend limit set on the Anthropic key's workspace in the Anthropic Console
 - [ ] Usage alert set there, to the same address as the AWS Budget
@@ -146,6 +147,17 @@ On n150-2, `kubectl` is the k3s wrapper, which tries
 real output in every `make` target.
 
 - [ ] Decide: a standalone `kubectl` for the sandbox (e.g. `KUBECTL ?=` in the Makefile), or accept the noise
+
+### 3.5 The LiteLLM ALB is HTTP only, so the master key crosses the internet in cleartext — **accepted for now**
+
+Chosen in phase 2a. It's acceptable because the security group admits only
+`alb_allowed_cidrs` (your own address), so a sniffed key is useless from
+anywhere else, and the key is replaced every night. HTTPS needs an ACM
+certificate, which needs a domain for DNS validation.
+
+- [ ] Decide on a domain (or subdomain) for the sandbox
+- [ ] ACM certificate in `tofu-account/` (permanent, free), DNS-validated
+- [ ] 443 listener + SG rule; `alb.ingress.kubernetes.io/certificate-arn` and ssl-redirect on the Ingress; port 80 closed
 
 ---
 

@@ -60,8 +60,11 @@ data:
       fallbacks:
         - claude-haiku: ["claude-haiku-direct"]
 
-    # No general_settings.master_key yet, deliberately: the Service is
-    # ClusterIP and reachable only by port-forward. Phase 2 adds ingress and
-    # a master key TOGETHER - never one without the other. The fallback raises
-    # the stakes: an unauthenticated caller can now spend on the Anthropic
-    # account, not just Bedrock quota.
+    # Phase 2a: the Ingress (ingress.yaml) and this key arrived TOGETHER -
+    # never one without the other. Every /v1 call needs
+    # "Authorization: Bearer <key>"; the health probes stay open.
+    # The value comes from the Tofu-created Secret litellm-master-key via the
+    # Deployment's LITELLM_MASTER_KEY, which is required, not optional: if it
+    # were unset LiteLLM would run with no auth at all.
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
