@@ -144,7 +144,9 @@ machine; a committed `.gitattributes` fixes every clone.
 On n150-2, `kubectl` is the k3s wrapper, which tries
 `/etc/rancher/k3s/config.yaml` before honouring `KUBECONFIG`. It prints
 `WARN … permission denied` three times per call. It is harmless, but it buries
-real output in every `make` target.
+real output in every `make` target. Phase 2a made it worse: `litellm-smoke`
+and `litellm-auth-check` call kubectl several times each, so a passing run is
+mostly warnings.
 
 - [ ] Decide: a standalone `kubectl` for the sandbox (e.g. `KUBECTL ?=` in the Makefile), or accept the noise
 
@@ -158,6 +160,22 @@ certificate, which needs a domain for DNS validation.
 - [ ] Decide on a domain (or subdomain) for the sandbox
 - [ ] ACM certificate in `tofu-account/` (permanent, free), DNS-validated
 - [ ] 443 listener + SG rule; `alb.ingress.kubernetes.io/certificate-arn` and ssl-redirect on the Ingress; port 80 closed
+
+### 3.6 Tofu provider plugins crash intermittently on n150-2 — **watching**
+
+Twice on 2026-09-25, a Tofu provider process stopped answering (`Plugin did not respond`):
+
+- **`make eks-up`:** `helm_release.alb_controller` and `helm_release.argocd` failed right after the 12½-minute cluster create. The Kubernetes provider had just succeeded with the same `aws eks get-token` login.
+- **`make eks-down`, about an hour later:** the **AWS** provider failed reading its schema, before `tofu destroy` had done anything. The load-balancer wait had already completed correctly.
+
+Both times, an immediate rerun succeeded. There was no kernel OOM kill and no `systemd-oomd` entry, and the rerun of the destroy, with `TF_LOG=DEBUG`, logged no panic or signal. The cause is unknown. It isn't one provider, and it isn't this week's code: the AWS provider version didn't change.
+
+Why it matters: the 02:00 timer runs from the same host. A crash there is a destroy that didn't happen. The fail-closed wait doesn't cover it, because the failure comes after the wait.
+
+- [ ] Check the 02:00 journal after the next few nights: `journalctl -u eks-teardown.service --since yesterday`
+- [ ] If it recurs, capture `TF_LOG=DEBUG TF_LOG_PATH=...` output from the failing run, not a rerun, and record the panic or signal here
+- [ ] Decide whether the teardown script should retry `tofu destroy` once on "Plugin did not respond" (a retry is safe: destroy is idempotent)
+- [ ] After three clean `eks-up` / `eks-down` pairs in a row, close this as environmental
 
 ---
 
