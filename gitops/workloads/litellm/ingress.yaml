@@ -1,0 +1,50 @@
+# Phase 2a: LiteLLM through the ALB. Arrives in the same change as the master
+# key (configmap.yaml, tofu/litellm.tf) - never an Ingress without the key.
+#
+# Three layers, each doing one job:
+#   1. security-groups: lab-sandbox-alb-ingress - Tofu builds it from
+#      alb_allowed_cidrs in the gitignored tfvars, so the home address never
+#      appears in this public repo. Port 80 only. Referenced by NAME.
+#   2. path /v1 only - the API. LiteLLM also serves its admin UI, API docs and
+#      management routes at other paths; none of those need to leave the cluster.
+#   3. the master key - every /v1 call needs "Authorization: Bearer <key>".
+#
+# HTTP, not HTTPS, for now: the key crosses the internet in cleartext, but the
+# SG only accepts your own address, so a sniffed key is useless from anywhere
+# else, and it is replaced every night. HTTPS needs an ACM cert and a domain -
+# see BACKLOG.md.
+#
+# manage-backend-security-group-rules MUST accompany the named security group:
+# naming a frontend SG turns off the controller's node-side rules, and the ALB
+# then provisions, passes its checks, and returns 504. (CLAUDE.md)
+#
+# The ALB this creates is NOT in Tofu state. Teardown deletes this Ingress and
+# waits for the ALB and its ENIs to go before destroying (scripts/eks-teardown.sh).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: litellm
+  namespace: litellm
+  labels:
+    app.kubernetes.io/name: litellm
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/security-groups: lab-sandbox-alb-ingress
+    alb.ingress.kubernetes.io/manage-backend-security-group-rules: "true"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    # The target health check goes straight to the pod, not through the
+    # Ingress rules, so it can use the unauthenticated readiness probe.
+    alb.ingress.kubernetes.io/healthcheck-path: /health/readiness
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: litellm
+                port:
+                  name: http
