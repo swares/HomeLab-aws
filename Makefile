@@ -137,9 +137,11 @@ litellm-master-key: ## Phase 2a: print this cluster's LiteLLM master key (new ev
 	@$(LITELLM_KEY_CMD); echo
 
 # Proves the three layers in front of LiteLLM from the outside. Must run from an
-# address in alb_allowed_cidrs. LiteLLM without a database refuses a missing or
-# wrong key with 500/400 rather than 401, so "refused" here means "anything but
-# 200"; what matters is that it never answers 200 without the key.
+# address in alb_allowed_cidrs. The refusal codes are not all 401: live on
+# 2026-09-25 (v1.101.0, no database) a missing key got 401 and a wrong key 400;
+# a local run of the same version answered a missing key with 500. So
+# "refused" here means "anything but 200"; what matters is that it never
+# answers 200 without the key.
 litellm-auth-check: ## Phase 2a: through the ALB - no key refused, wrong key refused, right key works, admin paths not exposed
 	@host=$$($(LITELLM_HOST_CMD)); \
 	  [[ -n "$$host" ]] || { echo "FAIL: the Ingress has no address yet"; exit 1; }; \

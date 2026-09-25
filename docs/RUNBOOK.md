@@ -408,9 +408,16 @@ make litellm-smoke LITELLM_VIA=alb            # a real Claude call through the A
 with `base_url="http://<alb>/v1"`. Treat it like a password for the session;
 it stops working when the cluster is torn down.
 
-Without a database, LiteLLM refuses a missing or wrong key with **500 or 400**,
-not 401. `litellm-auth-check` treats anything but 200 as refused; the only
-failure that matters is a 200 without the key.
+LiteLLM's refusal codes vary. On the first live run (2026-09-25, v1.101.0, no
+database) a missing key got **401** and a wrong key **400**; a local run of the
+same version answered a missing key with 500. `litellm-auth-check` therefore
+treats anything but 200 as refused; the only failure that matters is a 200
+without the key.
+
+**Verified live 2026-09-25:** all seven `litellm-auth-check` lines passed, and
+`make litellm-smoke LITELLM_VIA=alb` got a Claude reply through the ALB
+(`anthropic-haiku`, `attempted-fallbacks: 1`, since Bedrock still returns
+Error 002).
 
 | Symptom | Cause |
 |---|---|
