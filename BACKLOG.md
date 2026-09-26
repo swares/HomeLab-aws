@@ -61,7 +61,7 @@ cluster-admin to root alone.
 - [ ] README quickstart and RUNBOOK gain a login step: `aws sso login --use-device-code`
 - [ ] Break-glass envelope reviewed for the new identity, and re-printed if changed
 
-### 1.3 Anthropic spend is invisible to the AWS Budget — **open**
+### 1.3 ~~Anthropic spend is invisible to the AWS Budget~~ — **DONE 2026-09-26**
 
 The direct-API fallback bills the Anthropic account, which `tofu-account/`'s
 budget cannot see. While 1.1 lasts, that is all Claude spend. Since phase 2a
@@ -69,8 +69,13 @@ LiteLLM requires a per-cluster master key and is reachable from outside only
 from `alb_allowed_cidrs`, so spend needs the key. The limit below is the
 backstop for a leaked key or a runaway client, not the first line.
 
-- [ ] Monthly spend limit set on the Anthropic key's workspace in the Anthropic Console
-- [ ] Usage alert set there, to the same address as the AWS Budget
+- [x] Monthly spend limit set in the Anthropic Console: **$15/month**, organization-wide (2026-09-26)
+- [x] Usage alert set there: email to all organization admins at **$10** (2026-09-26)
+
+Credits auto-reload to $15 whenever the balance drops below $5. The monthly
+limit caps that too, so the worst case in a month is $15 of API spend,
+whatever the cause. If a real session ever hits the limit, raise it
+deliberately rather than turning it off.
 
 ### 1.4 Break-glass Drill A has not been run — **open**
 
@@ -141,14 +146,14 @@ fallback → "Removing it".
 - [ ] Decide: remove the fallback, or keep it as deliberate redundancy
 - [ ] If removed: ConfigMap entry, Deployment env, `litellm-key` and `fallback-check`, and the docs, in one PR
 
-### 3.3 Windows working copy shows every file modified — **open**
+### 3.3 ~~Windows working copy shows every file modified~~ — **DONE 2026-09-26**
 
 The Windows clone reported 34 files modified whose only change is line endings
 (CRLF vs LF). `core.autocrlf` is unset there. A per-clone setting fixes one
 machine; a committed `.gitattributes` fixes every clone.
 
 - [x] Decide: `core.autocrlf` on the Windows clone, or `.gitattributes` in the repo (`* text=auto eol=lf`) → `.gitattributes` (2026-09-26); every file in the index was already LF, so it renormalized nothing
-- [ ] Windows clone `git status` is clean after a fresh checkout
+- [x] Windows clone `git status` is clean after applying the `.gitattributes` commit (2026-09-26)
 
 ### 3.4 k3s's bundled kubectl warns on every sandbox command — **cosmetic**
 
