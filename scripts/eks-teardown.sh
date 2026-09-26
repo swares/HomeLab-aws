@@ -36,13 +36,43 @@ TOFU="${TOFU:-tofu}"
 
 log() { printf '%s  %s\n' "$(date -Is)" "$*"; }
 
+# tofu destroy, retried ONCE if and only if a provider plugin stopped
+# answering. On 2026-09-25 that happened twice on n150-2 in an hour (the helm
+# provider during eks-up, the aws provider during eks-down - BACKLOG 3.6), and
+# both times an immediate rerun succeeded. For the 02:00 timer a crash like that
+# is a cluster left billing until someone notices, so one retry is worth it.
+#
+# Deliberately narrow. Any OTHER failure (AccessDenied, DependencyViolation, a
+# state lock) fails at once, as before: retrying those hides a real problem and
+# delays the exit code the timer's journal relies on. Destroy is idempotent, so
+# a retry after a partial first run only has less left to do.
+DESTROY_RETRY_DELAY="${DESTROY_RETRY_DELAY:-15}"
+tofu_destroy() {
+  local out rc
+  out="$(mktemp)"
+  if $TOFU destroy -auto-approve -input=false 2>&1 | tee "$out"; then
+    rm -f "$out"; return 0
+  fi
+  rc=${PIPESTATUS[0]}
+  if grep -q "Plugin did not respond" "$out"; then
+    rm -f "$out"
+    log "WARN: tofu destroy failed with 'Plugin did not respond' (BACKLOG 3.6)."
+    log "WARN: retrying once in ${DESTROY_RETRY_DELAY}s."
+    sleep "$DESTROY_RETRY_DELAY"
+    $TOFU destroy -auto-approve -input=false
+    return $?
+  fi
+  rm -f "$out"
+  return "$rc"
+}
+
 # --- 0. Is there anything to tear down? ------------------------------------
 if ! aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" >/dev/null 2>&1; then
   log "No EKS cluster named '${CLUSTER_NAME}' in ${REGION}."
   log "Running tofu destroy anyway to clear any partial/orphaned state."
   cd "$TOFU_DIR"
   $TOFU init -input=false -upgrade=false >/dev/null
-  $TOFU destroy -auto-approve -input=false
+  tofu_destroy
   log "Done."
   exit 0
 fi
@@ -170,5 +200,5 @@ fi
 log "Running tofu destroy..."
 cd "$TOFU_DIR"
 $TOFU init -input=false -upgrade=false >/dev/null
-$TOFU destroy -auto-approve -input=false
+tofu_destroy
 log "Teardown complete."

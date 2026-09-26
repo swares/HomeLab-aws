@@ -161,17 +161,21 @@ certificate, which needs a domain for DNS validation.
 - [ ] ACM certificate in `tofu-account/` (permanent, free), DNS-validated
 - [ ] 443 listener + SG rule; `alb.ingress.kubernetes.io/certificate-arn` and ssl-redirect on the Ingress; port 80 closed
 
-### 3.6 The Helm provider crashed once during `eks-up` — **watching**
+### 3.6 Tofu provider plugins crash intermittently on n150-2 — **watching**
 
-On 2026-09-25 the first `make eks-up` after phase 2a failed with `Plugin did
-not respond` on both `helm_release.alb_controller` and `helm_release.argocd`,
-right after the 12½-minute cluster create. The Kubernetes provider had just
-succeeded with the same `aws eks get-token` login, and n150-2 showed no OOM
-kill. Rerunning `make eks-up` created the three remaining releases cleanly. The
-cause is unknown; the change that preceded it touched neither Helm release.
+Twice on 2026-09-25, a Tofu provider process stopped answering (`Plugin did not respond`):
 
-- [ ] If it recurs: rerun with `TF_LOG=DEBUG TF_LOG_PATH=/tmp/tofu-helm.log` and record the panic or signal here
-- [ ] After three clean `eks-up` runs in a row, close this as a one-off
+- **`make eks-up`:** `helm_release.alb_controller` and `helm_release.argocd` failed right after the 12½-minute cluster create. The Kubernetes provider had just succeeded with the same `aws eks get-token` login.
+- **`make eks-down`, about an hour later:** the **AWS** provider failed reading its schema, before `tofu destroy` had done anything. The load-balancer wait had already completed correctly.
+
+Both times, an immediate rerun succeeded. There was no kernel OOM kill and no `systemd-oomd` entry, and the rerun of the destroy, with `TF_LOG=DEBUG`, logged no panic or signal. The cause is unknown. It isn't one provider, and it isn't this week's code: the AWS provider version didn't change.
+
+Why it matters: the 02:00 timer runs from the same host. A crash there is a destroy that didn't happen. The fail-closed wait doesn't cover it, because the failure comes after the wait.
+
+- [ ] Check the 02:00 journal after the next few nights: `journalctl -u eks-teardown.service --since yesterday`
+- [ ] If it recurs, capture `TF_LOG=DEBUG TF_LOG_PATH=...` output from the failing run, not a rerun, and record the panic or signal here
+- [x] Teardown retries `tofu destroy` once on "Plugin did not respond", and only on that (2026-09-25; other failures still fail at once)
+- [ ] After three clean `eks-up` / `eks-down` pairs in a row, close this as environmental
 
 ---
 

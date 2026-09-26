@@ -172,6 +172,10 @@ journalctl -u eks-teardown.service --since yesterday
 - **`Unauthorized` from kubectl or Helm.** The cluster was created before the
   teardown access entry existed, or the entry was removed. Run `make eks-down`
   as yourself.
+- **`Plugin did not respond`, twice in a row.** The script already retried once
+  (look for `WARN: retrying once` just above). A second crash is BACKLOG 3.6
+  recurring: run `make eks-down` as yourself to stop the billing, then record
+  the run's `TF_LOG` output in 3.6.
 - **Anything else.** Run `make eks-down` as yourself first to stop the billing,
   then diagnose. The cluster costs money while you debug the timer.
 
