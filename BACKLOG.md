@@ -147,7 +147,7 @@ The Windows clone reported 34 files modified whose only change is line endings
 (CRLF vs LF). `core.autocrlf` is unset there. A per-clone setting fixes one
 machine; a committed `.gitattributes` fixes every clone.
 
-- [ ] Decide: `core.autocrlf` on the Windows clone, or `.gitattributes` in the repo (`* text=auto eol=lf`)
+- [x] Decide: `core.autocrlf` on the Windows clone, or `.gitattributes` in the repo (`* text=auto eol=lf`) → `.gitattributes` (2026-09-26); every file in the index was already LF, so it renormalized nothing
 - [ ] Windows clone `git status` is clean after a fresh checkout
 
 ### 3.4 k3s's bundled kubectl warns on every sandbox command — **cosmetic**
