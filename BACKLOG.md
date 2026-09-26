@@ -97,13 +97,24 @@ A reminder fires on 2026-11-03.
 - [ ] October bill closed
 - [ ] Resubmitted: one model, a modest tokens-per-minute increase, citing usage since September
 
-### 2.2 G-instance vCPU quota for phase 3 — **not requested**
+### 2.2 G-instance vCPU quota for phase 3 — **0 today, not requested**
 
-New accounts often start at 0 vCPUs for G instances, and a decision takes days.
-Given how 2.1 went, expect a first denial. Request it only once the account has
-history, but well before phase 3 starts.
+Checked 2026-09-25 in us-east-1: both quotas are **0 vCPUs** (both adjustable).
+Phase 3 cannot launch a single GPU node until one is raised; Karpenter's
+launches would fail with `VcpuLimitExceeded`. A decision takes days, and given
+how 2.1 went, expect a first denial. Request it only once the account has
+history, but well before phase 3 starts. Quotas count vCPUs, not instances: a
+`g5.xlarge` or `g4dn.xlarge` is 4, so 8 allows one node plus a replacement while
+Karpenter swaps it. Spot and on-demand are separate limits; phase 3 plans spot.
 
-- [ ] Current value checked: Service Quotas → EC2 → "Running On-Demand G and VT instances" and the spot equivalent
+Recheck (read-only):
+
+```bash
+aws service-quotas get-service-quota --region us-east-1 --service-code ec2 --quota-code L-DB2E81BA   # Running On-Demand G and VT instances
+aws service-quotas get-service-quota --region us-east-1 --service-code ec2 --quota-code L-3819A6DF   # All G and VT Spot Instance Requests
+```
+
+- [x] Current value checked: on-demand 0, spot 0 (2026-09-25)
 - [ ] Requested, sized to phase 3's node pool, once 1.1 is cleared
 
 ---
