@@ -113,7 +113,7 @@ from $73/mo to about $438/mo. Both numbers are why the nightly timer exists.
 
 | Phase | Content | Status |
 |---|---|---|
-| 0 | Create/destroy loop, self-bootstrapping Argo, Kyverno baseline, nightly teardown timer | done (break-glass Drill A outstanding) |
+| 0 | Create/destroy loop, self-bootstrapping Argo, Kyverno baseline, nightly teardown timer | done, except break-glass: the envelope isn't filled in yet and Drill A hasn't run (BACKLOG 1.5, 1.4) |
 | 1 | LiteLLM → Bedrock via **IRSA** (the core EKS lesson) | done - IRSA proven end to end. Bedrock itself is blocked account-wide (RUNBOOK, Error 002); Claude is served through the direct-API fallback, verified 2026-09-23 |
 | 2 | ALB controller and ingress, then the m5stack-adapter behind it, self-contained (a stub receiver stands in for the device - nothing reaches the lab) | done: controller and teardown with a live ALB; **2a** LiteLLM behind the ALB with a master key, verified live 2026-09-25; **2b** adapter + stub behind LiteLLM, verified live 2026-09-25 (both routes answered through the ALB, then a clean nightly teardown) |
 | 3 | Karpenter + GPU spot nodes; Whisper large-v3 batch | not started |

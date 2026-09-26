@@ -599,11 +599,14 @@ but `Lifecycle=permanent`, and must not show up as a leftover.
 
 ## Verifying before the first real session
 
-- [ ] `make eks-up` then `make eks-down` twice, cleanly, back to back
-- [ ] `resourcegroupstaggingapi` returns nothing after teardown
-- [ ] Permanent budget applied (`make account-apply`) and its lock file committed
-- [ ] `install-teardown-timer.sh` completed and authenticated as `lab-teardown`
-- [ ] A real `systemctl start eks-teardown.service` tore down a live cluster
-- [ ] `make eks-down` with no cluster present exits 0
-- [ ] Break-glass envelope filled, sealed, stored off-site
-- [ ] Drill A passed: teardown from a machine with no AWS credentials
+Checked against reality 2026-09-26 (BACKLOG 3.1). Open boxes are tracked in
+BACKLOG.md: tick them here and there together.
+
+- [ ] `make eks-up` then `make eks-down` twice, cleanly, back to back (not confirmed for any past session; the 2026-09-25 pair had provider crashes, BACKLOG 3.6)
+- [x] `resourcegroupstaggingapi` returns nothing after teardown (2026-09-26, the "Suspected orphans" query)
+- [x] Permanent budget applied (`make account-apply`) and its lock file committed (lock files: d5ac6ae)
+- [x] `install-teardown-timer.sh` completed and authenticated as `lab-teardown` (nightly runs clean 2026-09-23 to 09-26)
+- [x] A real `systemctl start eks-teardown.service` tore down a live cluster (2026-09-22: 24 resources destroyed, `Teardown complete.`)
+- [x] `make eks-down` with no cluster present exits 0 (the timer's no-cluster runs, 2026-09-23 to 09-26: `Done.`)
+- [ ] Break-glass envelope filled, sealed, stored off-site (not yet filled in: BACKLOG 1.5)
+- [ ] Drill A passed: teardown from a machine with no AWS credentials (BACKLOG 1.4)

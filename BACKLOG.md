@@ -84,8 +84,23 @@ switch: tearing down from a machine with no AWS credentials, using only the
 envelope. Until it passes, the envelope's first recovery step is untested.
 Procedure: `docs/BREAK-GLASS.md` → Drill A.
 
+Needs 1.5 first (the drill works from the envelope) and a healthy machine to
+run `eks-up` from (3.6).
+
 - [ ] Drill A run, result recorded in `docs/BREAK-GLASS.md`
 - [ ] README phase-0 status updated
+
+### 1.5 The break-glass envelope has not been filled in — **open**
+
+Found 2026-09-26 while checking the RUNBOOK checklist (3.1). The envelope is
+how you get back into the account, or stop the bill, if every device with AWS
+credentials is lost. Until it exists, a lockout has no recovery path, and
+Drill A (1.4) can't run. Procedure: RUNBOOK → One-time bootstrap → 4, and
+`docs/BREAK-GLASS.md`. If 1.2 changes the admin identity first, fill it in
+for the new identity.
+
+- [ ] Envelope filled (`scripts/print-aws-envelope.sh`), sealed, stored off-site
+- [ ] RUNBOOK checklist box ticked
 
 ---
 
@@ -126,15 +141,21 @@ aws service-quotas get-service-quota --region us-east-1 --service-code ec2 --quo
 
 ## 3. Repo and tooling hygiene
 
-### 3.1 RUNBOOK "Verifying before the first real session" is all unticked — **open**
+### 3.1 ~~RUNBOOK "Verifying before the first real session" is all unticked~~ — **DONE 2026-09-26**
 
 All eight boxes at the end of `docs/RUNBOOK.md` are `- [ ]`. But README says
 phase 0 is complete, and sessions have run since 2026-09-21. Either some of
 these are true and unticked, or README overstates phase 0. This is the same
 pattern the lab's audit script was written to catch.
 
-- [ ] Each of the eight checked against reality and ticked, or copied here as open work
-- [ ] README phase-0 status matches the result
+Result: five of the eight were true, and are now ticked with their evidence
+(the timer's journal settled three). The other three are open work
+elsewhere: the envelope is 1.5, Drill A is 1.4, and two clean back-to-back
+`eks-up` / `eks-down` pairs is 3.6's last box. README phase 0 now names
+what's missing.
+
+- [x] Each of the eight checked against reality and ticked, or copied here as open work (2026-09-26)
+- [x] README phase-0 status matches the result
 
 ### 3.2 Remove the direct-API fallback once Bedrock serves — **gated on 1.1 and 2.1**
 
@@ -202,7 +223,7 @@ Every time, an immediate rerun succeeded. In five weeks of kernel journal (since
 **Until it's fixed:**
 
 - [ ] No `tofu apply` or `destroy` from n150-2; run them from another machine
-- [ ] Decide: move the teardown timer to another always-on host, or leave no cluster up overnight and run `make eks-status` each morning
+- [x] Decide where the teardown timer runs → **it stays on n150-2 and keeps running** (2026-09-26). With no cluster it only runs `tofu destroy` on empty state, which is low risk. Until the fix is proven: no cluster left up overnight, and `make eks-status` the next morning after any session
 - [x] Teardown retries `tofu destroy` once on "Plugin did not respond", and only on that (2026-09-25; other failures still fail at once)
 
 **Fix, cheapest first:**
