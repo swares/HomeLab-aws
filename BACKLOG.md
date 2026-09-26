@@ -172,24 +172,40 @@ certificate, which needs a domain for DNS validation.
 - [ ] ACM certificate in `tofu-account/` (permanent, free), DNS-validated
 - [ ] 443 listener + SG rule; `alb.ingress.kubernetes.io/certificate-arn` and ssl-redirect on the Ingress; port 80 closed
 
-### 3.6 Processes crash intermittently on n150-2 (Tofu providers, pip) — **watching; memory test next**
+### 3.6 n150-2 has a memory fault: processes crash, and stress-ng finds bit errors — **confirmed hardware; fix pending**
 
-Three crashes on 2026-09-25, all on n150-2, in three different programs:
+**Symptoms.** Four crashes on 2026-09-25, all on n150-2, all during heavy CPU work:
 
-- **`make eks-up`:** `helm_release.alb_controller` and `helm_release.argocd` failed with `Plugin did not respond` right after the 12½-minute cluster create. The Kubernetes provider had just succeeded with the same `aws eks get-token` login.
-- **`make eks-down`, about an hour later:** the **AWS** provider failed reading its schema, before `tofu destroy` had done anything. The load-balancer wait had already completed correctly.
-- **`make adapter-push`, that evening:** pip segfaulted inside the Docker build. The kernel logged `traps: pip general protection fault ... in libpython3.12.so.1.0`.
+- **`make eks-up`:** `helm_release.alb_controller` and `helm_release.argocd` failed with `Plugin did not respond` right after the 12½-minute cluster create.
+- **`make eks-down`, about an hour later:** the **AWS** provider failed reading its schema, before `tofu destroy` had done anything.
+- **`make adapter-push`, that evening:** pip crashed during the Docker build (`traps: pip general protection fault ... in libpython3.12.so.1.0`). Three minutes later the AWS CLI segfaulted too (`aws: segfault ... in libpython3.14.so.1.0`).
 
-Every time, an immediate rerun succeeded. There was no kernel OOM kill and no `systemd-oomd` entry, and the rerun of the destroy, with `TF_LOG=DEBUG`, logged no panic or signal. It isn't one provider, and it isn't this week's code: the AWS provider version didn't change. The pip crash takes Tofu out of it altogether. A general protection fault in a stock Python library, with random programs failing and reruns succeeding, points to hardware, and memory is the first suspect. That is a hypothesis until a memory test says otherwise.
+Every time, an immediate rerun succeeded. In five weeks of kernel journal (since 2026-08-17), those two segfaults are the only ones. Tofu's plugins are Go programs: the Go runtime handles its own crashes, so those never reach the kernel log.
 
-Why it matters: the 02:00 timer runs from the same host. A crash there is a destroy that didn't happen. The fail-closed wait doesn't cover it, because the failure comes after the wait.
+**Diagnosis, 2026-09-26:**
 
-- [ ] Memory tested on n150-2: `memtester` for a quick look while it's up, then memtest86+ for at least one full pass; result recorded here
-- [ ] If memory fails: replace or reseat the DIMM, or move the teardown timer to another host until it's fixed
-- [ ] Check the 02:00 journal after the next few nights: `journalctl -u eks-teardown.service --since yesterday`
-- [ ] If it recurs, capture `TF_LOG=DEBUG TF_LOG_PATH=...` output from the failing run, not a rerun, and record the panic or signal here
+- `memtester 6G 2` (one thread, CPU mostly idle): **pass**.
+- In-band ECC is on (`igen6_edac`, `mc0`), but `ce_count` and `ue_count` stayed **0**, before and after the stress run. ECC does not cover the memory where the errors happened, so these counters say nothing about this fault. Don't use them to call n150-2 healthy.
+- `stress-ng --cpu 4 --vm 2 --vm-bytes 2G --verify --timeout 15m`: **FAIL**. The vm workers found 9 bit errors, and six memory-pattern checks failed (moving inversion, galpat-zero, gray code, and others). The CPU workers passed.
+- Peak temperature was 78 °C with no throttling, so it isn't heat.
+- The RAM is one removable 16 GB DDR4 SO-DIMM (part number `SS42J04NAR-16`, which looks generic or OEM) running at its rated 2667 MT/s. So it isn't overclocked, and the stick is the main suspect. Errors appear only when the CPU and memory are both under full load.
+
+**Why it matters.** The 02:00 teardown timer runs on this host: a crash there is a destroy that didn't happen, and the retry covers only one kind of failure. Worse, Tofu writes state to S3 from this machine's memory, so a bit flip can store a wrong state file. The adapter image `m5stack-adapter:1d6505c` was built here. It passed its live test, but corruption in a rarely used file wouldn't show.
+
+**Until it's fixed:**
+
+- [ ] No `tofu apply` or `destroy` from n150-2; run them from another machine
+- [ ] Decide: move the teardown timer to another always-on host, or leave no cluster up overnight and run `make eks-status` each morning
 - [x] Teardown retries `tofu destroy` once on "Plugin did not respond", and only on that (2026-09-25; other failures still fail at once)
-- [ ] After a clean memory test and three clean `eks-up` / `eks-down` pairs in a row, close this as environmental
+
+**Fix, cheapest first:**
+
+- [ ] Reseat the SO-DIMM, then rerun the same stress-ng command three times
+- [ ] If it still fails: swap in a known-good DDR4 SO-DIMM (another machine's, or a new Crucial or Kingston DDR4-3200). If the errors follow the old stick, the stick is bad
+- [ ] If errors stay with n150-2 on a known-good stick: try another power adapter, run memtest86+ overnight, then warranty
+- [ ] Fixed: three clean stress-ng runs in a row, recorded here with the date and what changed
+- [ ] Rebuild and push the adapter image from a healthy machine. ECR tags are immutable, so it needs a new tag (the next framework commit, or a suffix), and the manifest's image line changes in a PR
+- [ ] Then three clean `eks-up` / `eks-down` pairs before trusting the timer again
 
 ---
 
