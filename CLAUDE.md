@@ -186,6 +186,13 @@ ALB disappears from `DescribeLoadBalancers` in seconds while its interfaces
 detach for longer, and the interfaces are what `DeleteVpc` refuses over. Do not
 "simplify" that check back to counting load balancers.
 
+**`tofu destroy` is retried once, and only for `Plugin did not respond`.**
+Provider plugins crashed twice on n150-2 on 2026-09-25 and both reruns
+succeeded (BACKLOG 3.6). Every other destroy failure still fails at once.
+Never widen the retry to "any error": a retried AccessDenied or
+DependencyViolation hides the real problem and delays the failure the 02:00
+journal is supposed to show.
+
 **The wait fails closed.** A query that errors (throttling, an expired
 credential, a missing permission) counts as "still present", never as 0, and
 the error is logged. The VPC lookup follows the same rule: an error is retried,

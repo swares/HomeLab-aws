@@ -174,7 +174,7 @@ Why it matters: the 02:00 timer runs from the same host. A crash there is a dest
 
 - [ ] Check the 02:00 journal after the next few nights: `journalctl -u eks-teardown.service --since yesterday`
 - [ ] If it recurs, capture `TF_LOG=DEBUG TF_LOG_PATH=...` output from the failing run, not a rerun, and record the panic or signal here
-- [ ] Decide whether the teardown script should retry `tofu destroy` once on "Plugin did not respond" (a retry is safe: destroy is idempotent)
+- [x] Teardown retries `tofu destroy` once on "Plugin did not respond", and only on that (2026-09-25; other failures still fail at once)
 - [ ] After three clean `eks-up` / `eks-down` pairs in a row, close this as environmental
 
 ---
