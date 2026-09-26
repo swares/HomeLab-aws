@@ -21,7 +21,7 @@ spec:
         app.kubernetes.io/name: litellm
       annotations:
         # Roll the pod when the model config changes.
-        config-version: "3"
+        config-version: "4"
     spec:
       serviceAccountName: litellm
       # LiteLLM never calls the Kubernetes API, so no in-cluster API token.

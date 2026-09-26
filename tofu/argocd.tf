@@ -81,6 +81,16 @@ resource "helm_release" "argocd" {
 # deletes Applications before `tofu destroy` anyway, so this is belt and braces.
 # ---------------------------------------------------------------------------
 
+# Phase 2b: the ECR address of the adapter image. Built here from the caller
+# identity rather than read from tofu-account/ with a data source, for two
+# reasons: tofu/ stays independent of that module's state, and a data source
+# would be refreshed by the 02:00 destroy - needing ecr:DescribeRepositories on
+# lab-teardown for nothing. If the repository is missing, the pod shows
+# ImagePullBackOff, which is the right amount of failure.
+locals {
+  adapter_image_name = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com/${var.adapter_repository}"
+}
+
 resource "helm_release" "argocd_root" {
   name      = "argocd-root"
   namespace = "argocd"
@@ -104,6 +114,41 @@ resource "helm_release" "argocd_root" {
         destination = {
           server    = "https://kubernetes.default.svc"
           namespace = "argocd"
+        }
+        syncPolicy = {
+          automated   = { prune = true, selfHeal = true }
+          syncOptions = ["CreateNamespace=true"]
+        }
+      }
+
+      # Phase 2b. Defined HERE, not in gitops/apps/, for one reason: it carries
+      # the adapter's ECR address, which contains the account ID and so never
+      # goes in git. The override rewrites only the image NAME; the tag stays
+      # on the image line in gitops/workloads/m5stack/adapter-deployment.yaml,
+      # so version bumps remain ordinary PRs that Argo syncs.
+      #
+      # Owned by this Helm release, not by the root app - so gitops/apps/ must
+      # never also define an Application named m5stack. Teardown deletes it
+      # with the others (scripts/eks-teardown.sh deletes every Application).
+      m5stack = {
+        namespace  = "argocd"
+        finalizers = ["resources-finalizer.argocd.argoproj.io"]
+        project    = "default"
+        # After Kyverno (-1) and its policies (0), like litellm: the pods here
+        # have to pass them. The key is `additionalAnnotations`: the
+        # argocd-apps chart (2.0.5) silently ignores a plain `annotations`.
+        additionalAnnotations = { "argocd.argoproj.io/sync-wave" = "1" }
+        source = {
+          repoURL        = var.gitops_repo_url
+          targetRevision = var.gitops_revision
+          path           = "gitops/workloads/m5stack"
+          kustomize = {
+            images = ["m5stack-adapter=${local.adapter_image_name}"]
+          }
+        }
+        destination = {
+          server    = "https://kubernetes.default.svc"
+          namespace = "m5stack"
         }
         syncPolicy = {
           automated   = { prune = true, selfHeal = true }

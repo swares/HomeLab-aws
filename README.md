@@ -34,7 +34,7 @@ one `tofu destroy` leaves no trace on either side.
 | Path | What it is |
 |---|---|
 | `tofu/` | Root module: VPC, IAM, EKS, addons, Argo CD bootstrap. Destroyed nightly |
-| `tofu-account/` | **Permanent** root module: the monthly budget. Never torn down |
+| `tofu-account/` | **Permanent** root module: the monthly budget, the teardown identity, and the adapter's ECR repository. Never torn down |
 | `gitops/apps/` | App-of-apps children (Argo `Application` objects) |
 | `gitops/workloads/` | Manifests the Applications point at |
 | `gitops/bootstrap/` | Reference copy of the root Application (the live one is in `tofu/argocd.tf`) |
@@ -78,6 +78,8 @@ stop it.
 | Kyverno policies | `kyverno` | Three ClusterPolicies vendored from HomeLab, sync-wave 0 |
 | LiteLLM | `litellm` | Phase 1. OpenAI-compatible gateway to Claude Haiku 4.5 on Bedrock, sync-wave 1. **No AWS keys**: the pod gets credentials through IRSA. Falls back to the Anthropic API directly while Bedrock is unavailable; that key is prompted per session by `make litellm-key` and never in git or Tofu. Phase 2a: reachable through the ALB at `/v1` only, from `alb_allowed_cidrs` only, with a per-cluster master key (`make litellm-url`) |
 | AWS Load Balancer Controller | `kube-system` | Phase 2. Installed by Tofu. Turns Ingress objects into real ALBs - resources Tofu has no record of, which is why teardown is ordered |
+| m5stack-adapter | `m5stack` | Phase 2b. OpenAI-compatible front for the M5Stack device protocol, built from [My_M5Stack_Core_Framework](https://github.com/swares/My_M5Stack_Core_Framework) and pulled from ECR. Reached only through LiteLLM, as models `m5` and `m5-llm`. ClusterIP |
+| m5-stub | `m5stack` | Phase 2b. Stands in for the device: implements the framework's fire-and-poll protocol on a stock Python image, answers with `route_taken: stub-<slug>`. Nothing reaches the lab |
 
 The ALB's allowed source CIDR is **not in this repo**: Tofu builds the
 `lab-sandbox-alb-ingress` security group from `alb_allowed_cidrs` in the
@@ -100,6 +102,7 @@ it are created and destroyed together.
 | Bedrock, Claude Haiku 4.5 | per token | cents for a session of testing |
 | Anthropic API, Claude Haiku 4.5 (fallback) | per token, billed by Anthropic | cents; only when Bedrock fails. Not in the AWS Budget |
 | Application Load Balancer | ~$0.023/hr + LCUs | ~$0.20 (every session since phase 2a: the LiteLLM Ingress) |
+| ECR, adapter image (permanent) | $0.10/GB-month | about a cent a month; not per session |
 | **Total** | | **~$1.05**, or ~$1.25 with an ALB, plus Bedrock usage |
 
 Left running for a month, the same cluster is roughly **$85**. If the
@@ -112,7 +115,7 @@ from $73/mo to about $438/mo. Both numbers are why the nightly timer exists.
 |---|---|---|
 | 0 | Create/destroy loop, self-bootstrapping Argo, Kyverno baseline, nightly teardown timer | done (break-glass Drill A outstanding) |
 | 1 | LiteLLM → Bedrock via **IRSA** (the core EKS lesson) | done - IRSA proven end to end. Bedrock itself is blocked account-wide (RUNBOOK, Error 002); Claude is served through the direct-API fallback, verified 2026-09-23 |
-| 2 | ALB controller and ingress, then the m5stack-adapter behind it, self-contained (a stub receiver stands in for the device - nothing reaches the lab) | in progress: controller and teardown with a live ALB done; **2a** LiteLLM behind the ALB with a master key, verified live 2026-09-25; **2b** adapter + stub next |
+| 2 | ALB controller and ingress, then the m5stack-adapter behind it, self-contained (a stub receiver stands in for the device - nothing reaches the lab) | in progress: controller and teardown with a live ALB done; **2a** LiteLLM behind the ALB with a master key, verified live 2026-09-25; **2b** adapter + stub behind LiteLLM, built; awaiting live verification |
 | 3 | Karpenter + GPU spot nodes; Whisper large-v3 batch | not started |
 
 Lead-time items to start before phase 3: the **G-instance service quota**

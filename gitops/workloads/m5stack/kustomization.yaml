@@ -1,0 +1,32 @@
+# Phase 2b: the M5Stack adapter behind LiteLLM, with a stub standing in for the
+# device. Everything here is ClusterIP; outside access is only ever through
+# LiteLLM's Ingress (/v1, master key), as models `m5` and `m5-llm`.
+#
+# THE ADAPTER IMAGE HAS NO REGISTRY IN THIS REPO, deliberately. An ECR address
+# contains the account ID, which never goes in this public repo (CLAUDE.md).
+# adapter-deployment.yaml says `m5stack-adapter:<tag>`; the Argo Application
+# for this directory is defined in Tofu (tofu/argocd.tf), and it rewrites the
+# image NAME to the ECR repository. The TAG stays here, so a version bump is an
+# ordinary PR. (A name-only override keeps the tag written on the image line;
+# a tag set with `images: newTag:` in THIS file would be dropped by it -
+# verified with kustomize v5.8.1.)
+#
+# Without Tofu's override the image stays `m5stack-adapter:<tag>`, which pulls
+# from Docker Hub and fails - loudly, which is the right failure.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: m5stack
+
+resources:
+  - stub-deployment.yaml
+  - stub-service.yaml
+  - adapter-configmap.yaml
+  - adapter-deployment.yaml
+  - adapter-service.yaml
+
+# The stub's code, as a ConfigMap with a content-hash suffix: editing stub.py
+# changes the name, which rolls the stub pod. No image to build.
+configMapGenerator:
+  - name: m5-stub-code
+    files:
+      - stub.py

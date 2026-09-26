@@ -1,0 +1,19 @@
+# Adapter settings (read by the framework repo's scripts/openai_adapter/main.py).
+# Copied from the lab's gitops/workloads/ai-gateway/m5stack-adapter/configmap.yaml
+# and pointed at the stub; a snapshot allowed to drift, like the Kyverno policies.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: m5stack-adapter-env
+data:
+  # The stub, in-cluster, plain HTTP, no auth. The lab's M5_USER/M5_PASS
+  # ExternalSecret (Vault) has no equivalent here and is not needed.
+  M5_HOST: "http://m5-stub:8080"
+  M5_TLS_VERIFY: "false"
+  M5_CLEAR_BEFORE: "false"
+  M5_POLL_INTERVAL: "0.4"
+  # Shorter than the lab's 90 / 1800. The stub answers in two polls, so a turn
+  # that runs long is a fault, and M5_MAX_TOTAL must end it before the ALB's
+  # 60-second idle timeout cuts the client off with a bare 504.
+  M5_IDLE_TIMEOUT: "20"
+  M5_MAX_TOTAL: "50"

@@ -1,0 +1,52 @@
+# m5stack-adapter: OpenAI-compatible front for the M5Stack device protocol.
+# The CODE lives in swares/My_M5Stack_Core_Framework (scripts/openai_adapter/),
+# built and pushed to ECR by `make adapter-push`. This is the deployment only,
+# adapted from the lab's copy: no node pin (no LAN device here), no reloader,
+# no Vault ExternalSecret (the stub has no auth).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: m5stack-adapter
+  labels:
+    app.kubernetes.io/name: m5stack-adapter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: m5stack-adapter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: m5stack-adapter
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: adapter
+          # NAME is rewritten to the ECR repository by the Tofu-defined Argo
+          # Application (see kustomization.yaml). TAG is set here: the short
+          # commit of My_M5Stack_Core_Framework it was built from. Bump it in the
+          # same PR that follows `make adapter-push VERSION=<tag>`. ECR tags are
+          # immutable, so a tag always means the same image.
+          image: m5stack-adapter:1d6505c
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef: { name: m5stack-adapter-env }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }

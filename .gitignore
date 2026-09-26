@@ -17,3 +17,6 @@ override.tf.json
 kubeconfig*
 .aws/
 teardown.env
+
+# Python bytecode (stub.py, scripts/backlog-audit.py)
+__pycache__/

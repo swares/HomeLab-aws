@@ -432,6 +432,60 @@ Error 002).
 | `litellm-auth-check`: `no key -> 200 (the gateway is OPEN)` | The master key isn't applied. Stop and check the ConfigMap's `general_settings` and the pod's `LITELLM_MASTER_KEY` before doing anything else |
 | A client that worked yesterday gets 400/500 | Expected: the key is new per cluster. `make litellm-master-key` |
 
+### Phase 2b: the M5Stack adapter and stub
+
+```
+client ─▶ ALB (/v1, key) ─▶ LiteLLM ─▶ m5 / m5-llm ─▶ m5stack-adapter ─▶ m5-stub
+```
+
+The adapter's code lives in
+[My_M5Stack_Core_Framework](https://github.com/swares/My_M5Stack_Core_Framework)
+(`scripts/openai_adapter/`, sharing `scripts/protocol.py`). This repo only
+deploys it. The stub is `gitops/workloads/m5stack/stub.py`, run on a stock
+Python image, so there is only one image to build.
+
+**One-time, no cluster needed** (admin credentials, and Docker on the machine
+that builds):
+
+```bash
+make account-apply                        # creates the ECR repository (tofu-account/ecr.tf)
+git clone https://github.com/swares/My_M5Stack_Core_Framework.git ~/src/m5fw   # if not already
+git -C ~/src/m5fw fetch && git -C ~/src/m5fw checkout "$(make -s adapter-version)"   # the pinned commit
+make adapter-push SRC=~/src/m5fw          # builds scripts/openai_adapter, pushes :<pinned tag>
+make adapter-images                       # the tag is there, and matches "Manifest pins"
+```
+
+The image tag is the framework's short commit hash, pinned on the image line in
+`gitops/workloads/m5stack/adapter-deployment.yaml`. `adapter-push` defaults to
+that tag and warns if `SRC` is checked out at a different commit. ECR tags are
+immutable, so a tag always names the same image; the repository keeps the three
+newest.
+
+**Updating the adapter:** check out the new framework commit, run
+`make adapter-push SRC=… VERSION=<new short hash>`, then change the tag on the
+image line in a PR. Argo rolls the pod when the PR merges.
+
+**Each session**, after `eks-up` and the phase-2a checks:
+
+```bash
+make litellm-smoke LITELLM_VIA=alb LITELLM_MODEL=m5-llm   # reply: "stub device (llm): ..." ; model id m5stack-llm
+make litellm-smoke LITELLM_VIA=alb LITELLM_MODEL=m5       # the router slug; model id m5stack-route
+kubectl -n m5stack get pods                               # m5-stub and m5stack-adapter Running
+```
+
+A stub reply proves the whole path: the ALB, the master key, LiteLLM's routing,
+the adapter's OpenAI translation, and the device protocol. Only the hardware is
+missing. The adapter's `x_route_taken` is `stub-<slug>`, so a stub answer can't
+be mistaken for a real device.
+
+| Symptom | Cause |
+|---|---|
+| adapter pod `ImagePullBackOff`, image `…amazonaws.com/lab-sandbox/m5stack-adapter:<tag>` | That tag was never pushed. `make adapter-images`, then `make adapter-push SRC=…` for the pinned tag |
+| adapter pod `ImagePullBackOff`, image plain `m5stack-adapter:<tag>` (no registry) | The Tofu-defined Argo Application's image override is missing. `kubectl -n argocd get application m5stack -o yaml`, check `spec.source.kustomize.images` |
+| Argo `m5stack` app fails admission: "Image must include an explicit tag" | The tag was moved off the image line (see CLAUDE.md: the override drops a kustomization `newTag`) |
+| `m5` call returns an empty reply after about 50 s | The adapter hit `M5_MAX_TOTAL`: the stub isn't answering. `kubectl -n m5stack logs deploy/m5-stub` |
+| `404 unknown model` from the adapter | LiteLLM's `model:` for that route isn't one of the adapter's names (`m5-llm`, `m5-route`, `m5-claude`) |
+
 ### When it fails
 
 | Symptom | Cause |

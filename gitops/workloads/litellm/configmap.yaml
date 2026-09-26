@@ -50,6 +50,30 @@ data:
         model_info:
           id: anthropic-haiku
 
+      # Phase 2b: the M5Stack adapter (gitops/workloads/m5stack), which in the
+      # sandbox drives a stub device, not hardware. The adapter speaks OpenAI,
+      # so these are openai/ routes; `model` is the ADAPTER's model name
+      # (m5-route, m5-llm), `model_name` is what clients ask for. Same names
+      # as the lab's AI routing: `m5` = the full escalation router.
+      # api_key is required by the openai provider and ignored by the
+      # adapter - it is not a credential. No fallback: a stub that fails
+      # should fail visibly, not be papered over by Claude.
+      - model_name: m5
+        litellm_params:
+          model: openai/m5-route
+          api_base: http://m5stack-adapter.m5stack.svc:8080/v1
+          api_key: unused
+        model_info:
+          id: m5stack-route
+
+      - model_name: m5-llm
+        litellm_params:
+          model: openai/m5-llm
+          api_base: http://m5stack-adapter.m5stack.svc:8080/v1
+          api_key: unused
+        model_info:
+          id: m5stack-llm
+
     litellm_settings:
       # Never send prompt/response bodies to any callback or log sink.
       turn_off_message_logging: true
