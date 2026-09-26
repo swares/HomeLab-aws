@@ -161,21 +161,24 @@ certificate, which needs a domain for DNS validation.
 - [ ] ACM certificate in `tofu-account/` (permanent, free), DNS-validated
 - [ ] 443 listener + SG rule; `alb.ingress.kubernetes.io/certificate-arn` and ssl-redirect on the Ingress; port 80 closed
 
-### 3.6 Tofu provider plugins crash intermittently on n150-2 — **watching**
+### 3.6 Processes crash intermittently on n150-2 (Tofu providers, pip) — **watching; memory test next**
 
-Twice on 2026-09-25, a Tofu provider process stopped answering (`Plugin did not respond`):
+Three crashes on 2026-09-25, all on n150-2, in three different programs:
 
-- **`make eks-up`:** `helm_release.alb_controller` and `helm_release.argocd` failed right after the 12½-minute cluster create. The Kubernetes provider had just succeeded with the same `aws eks get-token` login.
+- **`make eks-up`:** `helm_release.alb_controller` and `helm_release.argocd` failed with `Plugin did not respond` right after the 12½-minute cluster create. The Kubernetes provider had just succeeded with the same `aws eks get-token` login.
 - **`make eks-down`, about an hour later:** the **AWS** provider failed reading its schema, before `tofu destroy` had done anything. The load-balancer wait had already completed correctly.
+- **`make adapter-push`, that evening:** pip segfaulted inside the Docker build. The kernel logged `traps: pip general protection fault ... in libpython3.12.so.1.0`.
 
-Both times, an immediate rerun succeeded. There was no kernel OOM kill and no `systemd-oomd` entry, and the rerun of the destroy, with `TF_LOG=DEBUG`, logged no panic or signal. The cause is unknown. It isn't one provider, and it isn't this week's code: the AWS provider version didn't change.
+Every time, an immediate rerun succeeded. There was no kernel OOM kill and no `systemd-oomd` entry, and the rerun of the destroy, with `TF_LOG=DEBUG`, logged no panic or signal. It isn't one provider, and it isn't this week's code: the AWS provider version didn't change. The pip crash takes Tofu out of it altogether. A general protection fault in a stock Python library, with random programs failing and reruns succeeding, points to hardware, and memory is the first suspect. That is a hypothesis until a memory test says otherwise.
 
 Why it matters: the 02:00 timer runs from the same host. A crash there is a destroy that didn't happen. The fail-closed wait doesn't cover it, because the failure comes after the wait.
 
+- [ ] Memory tested on n150-2: `memtester` for a quick look while it's up, then memtest86+ for at least one full pass; result recorded here
+- [ ] If memory fails: replace or reseat the DIMM, or move the teardown timer to another host until it's fixed
 - [ ] Check the 02:00 journal after the next few nights: `journalctl -u eks-teardown.service --since yesterday`
 - [ ] If it recurs, capture `TF_LOG=DEBUG TF_LOG_PATH=...` output from the failing run, not a rerun, and record the panic or signal here
 - [x] Teardown retries `tofu destroy` once on "Plugin did not respond", and only on that (2026-09-25; other failures still fail at once)
-- [ ] After three clean `eks-up` / `eks-down` pairs in a row, close this as environmental
+- [ ] After a clean memory test and three clean `eks-up` / `eks-down` pairs in a row, close this as environmental
 
 ---
 
@@ -197,3 +200,12 @@ refused with Error 002, and the direct path answered with
 
 - [x] The wait also counts ELB-owned network interfaces (PR #11)
 - [x] A failed AWS query holds the wait instead of reading as 0; the VPC lookup retries (PR #14)
+
+### 4.3 ~~Roadmap phase 2b: the M5Stack adapter behind LiteLLM, with a stub device~~ — **DONE 2026-09-25**
+
+Recorded here because it closed roadmap phase 2; the roadmap itself is in the
+README. The adapter image is built from the framework repo and pulled from ECR;
+the stub stands in for the device, so nothing reaches the lab.
+
+- [x] ECR repository, adapter and stub manifests, `adapter-push` (PR #20)
+- [x] Verified live: `m5-llm` and `m5` answered through the ALB with the master key; the nightly teardown removed the app and destroyed 36 resources cleanly
