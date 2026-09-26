@@ -17,6 +17,15 @@ CLUSTER   ?= lab-sandbox
 # Use `eval "$(make -s eks-env)"` to point a shell at the sandbox.
 EKS_KUBECONFIG ?= $(HOME)/.kube/eks-sandbox
 
+# Which kubectl to run. On n150-2 plain `kubectl` is the k3s wrapper, which
+# reads /etc/rancher/k3s/ before honouring KUBECONFIG and prints three
+# "permission denied" warnings per call (BACKLOG 3.4). Point this at an
+# upstream kubectl to silence them, e.g. in ~/.bashrc:
+#   export KUBECTL=$HOME/.local/bin/kubectl-upstream
+# Upstream kubectl must be within one minor version of the cluster (EKS 1.35:
+# 1.34-1.36). The default stays `kubectl`, so nothing changes until you set it.
+KUBECTL ?= kubectl
+
 # Argo CD creates the litellm Deployment a few minutes after `eks-up` returns
 # (root app -> litellm app -> manifests). The phase-1 targets wait rather than
 # failing with "deployments.apps \"litellm\" not found".
@@ -42,8 +51,8 @@ VERSION         ?= $(shell sed -n 's/^ *image: m5stack-adapter:\([^ ]*\).*/\1/p'
 
 # Read the per-cluster master key (Tofu-created Secret). Used inside recipes;
 # the key goes to curl on stdin (-H @-), never in argv.
-LITELLM_KEY_CMD = KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm get secret litellm-master-key -o jsonpath='{.data.master-key}' | base64 -d
-LITELLM_HOST_CMD = KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm get ingress litellm -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+LITELLM_KEY_CMD = KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm get secret litellm-master-key -o jsonpath='{.data.master-key}' | base64 -d
+LITELLM_HOST_CMD = KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm get ingress litellm -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 
 help:        ## Show this help
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t-/' | sort
@@ -79,21 +88,21 @@ eks-env:     ## Print the export line; use: eval "$(make -s eks-env)"
 	@echo "export KUBECONFIG=$(EKS_KUBECONFIG)"
 
 argocd-ui:   ## Print the admin password and start a port-forward on :8080
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n argocd get secret argocd-initial-admin-secret \
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n argocd get secret argocd-initial-admin-secret \
 		-o jsonpath='{.data.password}' | base64 -d; echo
 	@echo "user: admin   ->  http://localhost:8080"
-	KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n argocd port-forward svc/argocd-server 8080:443
+	KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n argocd port-forward svc/argocd-server 8080:443
 
 litellm-wait:  ## Phase 1: wait for Argo to create the litellm Deployment, then for it to be ready
 	@echo "Waiting up to $(LITELLM_WAIT)s for Argo CD to create deploy/litellm..."
 	@deadline=$$(( $$(date +%s) + $(LITELLM_WAIT) )); \
-	  until KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm get deploy/litellm >/dev/null 2>&1; do \
+	  until KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm get deploy/litellm >/dev/null 2>&1; do \
 	    if [[ $$(date +%s) -ge $$deadline ]]; then \
 	      echo "FAIL: deploy/litellm never appeared. Check: kubectl -n argocd get applications"; exit 1; \
 	    fi; \
 	    sleep 5; \
 	  done
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm rollout status deploy/litellm --timeout=180s
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm rollout status deploy/litellm --timeout=180s
 
 # LITELLM_VIA=pf (default) port-forwards to a FREE local port, never a fixed
 # 4000: a leftover port-forward (from a manual test, or pointing at a pod that
@@ -112,7 +121,7 @@ litellm-smoke: litellm-wait ## Phase 1: one real Claude call through LiteLLM; pr
 	    base="http://$$host"; \
 	  else \
 	    port=$$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'); \
-	    KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm port-forward svc/litellm $$port:4000 >/dev/null 2>&1 & pf=$$!; \
+	    KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm port-forward svc/litellm $$port:4000 >/dev/null 2>&1 & pf=$$!; \
 	    for i in $$(seq 1 30); do \
 	      kill -0 $$pf 2>/dev/null || { echo "FAIL: kubectl port-forward exited before it was ready"; exit 1; }; \
 	      (exec 3<>/dev/tcp/127.0.0.1/$$port) 2>/dev/null && break; sleep 0.5; \
@@ -183,28 +192,28 @@ litellm-key: litellm-wait ## Fallback: prompt for the Anthropic API key, store i
 	  if [[ "$$key" =~ [[:space:]] ]]; then unset key; echo "FAIL: key contains whitespace - paste only the key"; exit 1; fi; \
 	  if [[ "$$key" != sk-ant-api* ]]; then unset key; \
 	    echo "FAIL: not a standard Anthropic API key (sk-ant-api...). Admin keys and OAuth tokens cannot call the Messages API."; exit 1; fi; \
-	  KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm delete secret litellm-anthropic --ignore-not-found >/dev/null; \
-	  printf '%s' "$$key" | KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm create secret generic litellm-anthropic \
+	  KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm delete secret litellm-anthropic --ignore-not-found >/dev/null; \
+	  printf '%s' "$$key" | KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm create secret generic litellm-anthropic \
 	    --from-file=api-key=/dev/stdin >/dev/null; \
 	  rc=$$?; unset key; [[ $$rc -eq 0 ]] && echo "OK: secret litellm-anthropic written" || exit $$rc
 	@# os.environ/ is resolved at LiteLLM startup: a new key needs a new pod.
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm rollout restart deploy/litellm
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm rollout status deploy/litellm --timeout=180s
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm rollout restart deploy/litellm
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm rollout status deploy/litellm --timeout=180s
 
 fallback-check: litellm-wait ## Fallback: key present in-cluster only - never in the ConfigMap or git
-	@if KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm get secret litellm-anthropic >/dev/null 2>&1; then \
+	@if KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm get secret litellm-anthropic >/dev/null 2>&1; then \
 	  echo "OK: secret litellm-anthropic exists"; \
 	else echo "INFO: no secret litellm-anthropic - run 'make litellm-key' (without it claude-haiku has no fallback; while the account has Bedrock Error 002 it cannot answer at all)"; fi
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm exec deploy/litellm -- \
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm exec deploy/litellm -- \
 	  sh -c 'if [ -n "$$ANTHROPIC_API_KEY" ]; then echo "OK: pod has ANTHROPIC_API_KEY ($${#ANTHROPIC_API_KEY} chars)"; \
 	         else echo "INFO: pod has no ANTHROPIC_API_KEY - run make litellm-key (it restarts the pod)"; fi'
-	@if KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm get configmap litellm-config -o yaml | grep -q 'sk-ant-'; then \
+	@if KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm get configmap litellm-config -o yaml | grep -q 'sk-ant-'; then \
 	  echo "FAIL: key material in the ConfigMap"; exit 1; else echo "OK: ConfigMap holds no key"; fi
 	@if git grep -qE 'sk-ant-[A-Za-z0-9]'; then echo "FAIL: key material committed to git"; exit 1; \
 	  else echo "OK: no key in git"; fi
 
 irsa-check: litellm-wait ## Phase 1: prove the pod has web-identity creds and NO static keys
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n litellm exec deploy/litellm -- \
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n litellm exec deploy/litellm -- \
 	  sh -c 'env | grep -E "^AWS_(ROLE_ARN|WEB_IDENTITY_TOKEN_FILE)=" | sed "s/[0-9]\{12\}/<acct>/"; \
 	         if env | grep -qE "^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)="; then echo "FAIL: static keys present"; exit 1; \
 	         else echo "OK: no static AWS keys in the pod"; fi; \
@@ -214,11 +223,11 @@ irsa-check: litellm-wait ## Phase 1: prove the pod has web-identity creds and NO
 	         else echo "OK: no Kubernetes API token (automount off)"; fi'
 
 alb-check:   ## Phase 2: prove the AWS Load Balancer Controller is up and holding IRSA creds
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n kube-system rollout status deploy/aws-load-balancer-controller --timeout=180s
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl get ingressclass alb -o jsonpath='{.metadata.name}{"\t"}{.spec.controller}{"\n"}'
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n kube-system rollout status deploy/aws-load-balancer-controller --timeout=180s
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) get ingressclass alb -o jsonpath='{.metadata.name}{"\t"}{.spec.controller}{"\n"}'
 	@# The controller image is distroless, so there is no shell to exec into:
 	@# read the annotation the pod-identity webhook acts on instead.
-	@KUBECONFIG=$(EKS_KUBECONFIG) kubectl -n kube-system get sa aws-load-balancer-controller \
+	@KUBECONFIG=$(EKS_KUBECONFIG) $(KUBECTL) -n kube-system get sa aws-load-balancer-controller \
 	  -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}{"\n"}' | sed 's/[0-9]\{12\}/<acct>/'
 
 cost:        ## Month-to-date spend

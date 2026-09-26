@@ -33,6 +33,8 @@ CLUSTER_NAME="${CLUSTER_NAME:-lab-sandbox}"
 REGION="${AWS_REGION:-us-east-1}"
 LB_WAIT_SECONDS="${LB_WAIT_SECONDS:-300}"
 TOFU="${TOFU:-tofu}"
+# Overridable like TOFU: an upstream kubectl avoids the k3s wrapper's warnings (BACKLOG 3.4).
+KUBECTL="${KUBECTL:-kubectl}"
 
 log() { printf '%s  %s\n' "$(date -Is)" "$*"; }
 
@@ -90,13 +92,13 @@ log "Kubeconfig written."
 # Deleting Applications (which carry resources-finalizer) cascades to the
 # resources they manage - including any Ingress or LoadBalancer Service.
 # Delete the root last so it does not immediately re-create the children.
-if kubectl get crd applications.argoproj.io >/dev/null 2>&1; then
+if "$KUBECTL" get crd applications.argoproj.io >/dev/null 2>&1; then
   log "Deleting Argo CD Applications (cascades to managed resources)..."
-  kubectl -n argocd delete applications.argoproj.io --all \
+  "$KUBECTL" -n argocd delete applications.argoproj.io --all \
     --ignore-not-found --timeout=180s || {
       log "WARN: Application delete timed out. Stripping finalizers and continuing."
-      for app in $(kubectl -n argocd get applications.argoproj.io -o name 2>/dev/null || true); do
-        kubectl -n argocd patch "$app" --type=merge \
+      for app in $("$KUBECTL" -n argocd get applications.argoproj.io -o name 2>/dev/null || true); do
+        "$KUBECTL" -n argocd patch "$app" --type=merge \
           -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 || true
       done
     }
@@ -106,13 +108,13 @@ fi
 
 # --- 3. Sweep any load-balancer-backed objects Argo did not own ------------
 log "Deleting any remaining Ingresses and LoadBalancer Services..."
-kubectl delete ingress --all --all-namespaces --ignore-not-found --timeout=120s || true
-for svc in $(kubectl get svc --all-namespaces \
+"$KUBECTL" delete ingress --all --all-namespaces --ignore-not-found --timeout=120s || true
+for svc in $("$KUBECTL" get svc --all-namespaces \
       -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' \
       2>/dev/null || true); do
   ns="${svc%%/*}"; name="${svc##*/}"
   log "  deleting Service ${ns}/${name} (type=LoadBalancer)"
-  kubectl -n "$ns" delete svc "$name" --ignore-not-found --timeout=120s || true
+  "$KUBECTL" -n "$ns" delete svc "$name" --ignore-not-found --timeout=120s || true
 done
 
 # --- 4. WAIT for AWS to actually remove the load balancers -----------------

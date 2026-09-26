@@ -96,12 +96,36 @@ Verify after `eks-up` (in the `eval`'d shell):
 
 ```bash
 kubectl get nodes                          # 2 Ready
-kubectl -n argocd get applications         # root, kyverno, kyverno-policies Synced/Healthy
+kubectl -n argocd get applications         # root, kyverno, kyverno-policies, litellm, m5stack Synced/Healthy
 kubectl get clusterpolicies                # 3, all Ready
 ```
 
 There is no ingress and no public endpoint for Argo. The UI is reached by
-port-forward only. This is deliberate — see `CLAUDE.md`.
+port-forward only. This is deliberate — see `CLAUDE.md`. (The one Ingress in
+the cluster is LiteLLM's, `/v1` only; see Phase 2a.)
+
+### Quieter kubectl on n150-2 (optional)
+
+On n150-2, `kubectl` is the k3s wrapper. It reads `/etc/rancher/k3s/` before
+honouring `KUBECONFIG` and prints three `permission denied` warnings on every
+call, which bury the real output of targets like `litellm-auth-check`. The
+Makefile and `scripts/eks-teardown.sh` run whatever `KUBECTL` names, so an
+upstream kubectl beside the wrapper fixes it without touching the lab:
+
+```bash
+v=$(curl -fsSL https://dl.k8s.io/release/stable-1.35.txt)      # match the cluster's minor version
+curl -fsSLO "https://dl.k8s.io/release/$v/bin/linux/amd64/kubectl"
+curl -fsSLO "https://dl.k8s.io/release/$v/bin/linux/amd64/kubectl.sha256"
+echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check      # must print: kubectl: OK
+install -m 0755 kubectl ~/.local/bin/kubectl-upstream && rm kubectl kubectl.sha256
+echo 'export KUBECTL=$HOME/.local/bin/kubectl-upstream' >> ~/.bashrc
+```
+
+Plain `kubectl` still means the lab's k3s. The name `kubectl-upstream` is
+deliberate: a binary called `kubectl` earlier in `PATH` would silently replace
+the wrapper for the lab too. When the cluster version moves, re-run with the
+new minor version. The timer is unaffected: it runs as `eks-teardown`, which
+never reads your `~/.bashrc`, so it keeps using plain `kubectl` as before.
 
 ## Teardown timer
 

@@ -1,0 +1,10 @@
+# Every text file is stored AND checked out with LF, on every OS.
+#
+# Why: the repo's scripts run on Linux (bash, the systemd units, Tofu,
+# Kustomize), and a CRLF shebang line fails with "bad interpreter". The
+# Windows clone also showed every file as modified when only line endings
+# differed (BACKLOG 3.3). A per-clone core.autocrlf fixes one machine; this
+# file fixes every clone, and overrides core.autocrlf where it is set.
+#
+# text=auto lets git detect binaries, so an image added later is left alone.
+* text=auto eol=lf
