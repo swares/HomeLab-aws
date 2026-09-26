@@ -148,6 +148,18 @@ Phase 1 established the pattern for any pod that calls AWS:
   aws-load-balancer-controller): the role ARN is a Helm value in Tofu, still
   never a manifest in git. Tofu only creates the SA itself when nothing else
   will.
+- **An ECR image address is an account-ID value too** (phase 2b). The adapter
+  Deployment in git says `m5stack-adapter:<tag>`. The `m5stack` Argo
+  Application is defined in `tofu/argocd.tf`, not in `gitops/apps/`, and it
+  rewrites the image **name** to the ECR repository. The **tag** stays on the
+  image line in git, so version bumps are ordinary PRs. Never move the tag into
+  the kustomization's `images: newTag:`: Argo's name-only override drops it,
+  the image becomes `:latest`, and Kyverno rejects it (verified with kustomize
+  v5.8.1). Never write the registry into a manifest, and never read the ECR
+  repository through a data source in `tofu/`: the 02:00 destroy would refresh
+  it and need `ecr:DescribeRepositories` on `lab-teardown` for nothing.
+- **argocd-apps chart keys are not Argo's keys.** Per-Application annotations go
+  in `additionalAnnotations`; version 2.0.5 silently ignores `annotations`.
 
 ## Nothing that identifies the home network goes in git
 
@@ -281,3 +293,6 @@ without a checkbox or an owning entry. Run it before any PR that touches the fil
 - The root `Application` exists twice: rendered by the `argocd-apps` Helm release
   in `tofu/argocd.tf` (the live one) and as a reference copy in
   `gitops/bootstrap/root-app.yaml`. If you edit one, edit both.
+- The `m5stack` Application exists **once**, in `tofu/argocd.tf`, because it
+  carries the ECR address. `gitops/apps/` must never also define one by that
+  name: two owners of one Application fight on every sync.

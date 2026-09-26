@@ -1,7 +1,7 @@
 # Convenience targets for the EKS sandbox. Mirrors the conventions in
 # swares/HomeLab: `make help` greps the ## comments.
 .PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui litellm-wait litellm-smoke litellm-url litellm-master-key litellm-auth-check litellm-key fallback-check irsa-check alb-check cost fmt validate \
-        account-init account-plan account-apply backlog
+        account-init account-plan account-apply backlog adapter-push adapter-images adapter-version
 
 # Recipes use bash features ([[ ]]); /bin/sh on Debian is dash.
 SHELL     := /bin/bash
@@ -31,6 +31,14 @@ LITELLM_MODEL ?= claude-haiku
 # from anywhere with the kubeconfig) or `alb` (through the Ingress, works only
 # from an address in alb_allowed_cidrs - the real client path).
 LITELLM_VIA ?= pf
+
+# Phase 2b: the adapter image. Repository name must match var.adapter_repository
+# in both tofu modules. The TAG defaults to the one pinned on the image line in
+# gitops/workloads/m5stack/adapter-deployment.yaml, so the image pushed is the
+# image the cluster will ask for.
+ADAPTER_REPO    ?= lab-sandbox/m5stack-adapter
+ADAPTER_MANIFEST = gitops/workloads/m5stack/adapter-deployment.yaml
+VERSION         ?= $(shell sed -n 's/^ *image: m5stack-adapter:\([^ ]*\).*/\1/p' $(ADAPTER_MANIFEST))
 
 # Read the per-cluster master key (Tofu-created Secret). Used inside recipes;
 # the key goes to curl on stdin (-H @-), never in argv.
@@ -121,7 +129,7 @@ litellm-smoke: litellm-wait ## Phase 1: one real Claude call through LiteLLM; pr
 	      || head -c 1500 "$$body"; echo; exit 1; \
 	  fi; \
 	  python3 -c 'import json,sys; r=json.load(sys.stdin); print("model:", r["model"]); print("reply:", r["choices"][0]["message"]["content"])' < "$$body"; \
-	  echo "via $(LITELLM_VIA); backend (bedrock-haiku | anthropic-haiku) and fallbacks attempted:"; \
+	  echo "via $(LITELLM_VIA); backend (x-litellm-model-id) and fallbacks attempted:"; \
 	  grep -iE '^x-litellm-(model-id|attempted-fallbacks):' "$$hdr" | tr -d '\r' | sed 's/^/  /'
 
 litellm-url: ## Phase 2a: print the ALB URL and a ready-to-run curl (the key is fetched at run time, not printed)
@@ -227,6 +235,38 @@ fmt:         ## Format HCL
 
 validate:    ## Validate HCL
 	cd $(TOFU_DIR) && $(TOFU) validate
+
+# --- Phase 2b: the m5stack-adapter image -------------------------------------
+# Built from swares/My_M5Stack_Core_Framework (scripts/openai_adapter/, with
+# protocol.py beside it - hence the scripts/ build context), pushed to the ECR
+# repository in tofu-account/ecr.tf. Needs docker and admin credentials; no
+# cluster. The registry login is removed again afterwards (docker logout), so
+# no ECR token is left in ~/.docker/config.json.
+adapter-push: ## Phase 2b: build the adapter from SRC=<framework repo> and push VERSION (default: the tag pinned in git) to ECR
+	@[[ -n "$(SRC)" && -f "$(SRC)/scripts/openai_adapter/Dockerfile" ]] || { \
+	  echo "usage: make adapter-push SRC=~/path/to/My_M5Stack_Core_Framework [VERSION=<tag>]"; exit 1; }
+	@[[ -n "$(VERSION)" ]] || { echo "FAIL: no tag found on the image line in $(ADAPTER_MANIFEST)"; exit 1; }
+	@head=$$(git -C "$(SRC)" rev-parse --short HEAD 2>/dev/null || echo "?"); \
+	  if [[ "$$head" != "$(VERSION)" ]]; then \
+	    echo "WARN: $(SRC) is at $$head but the tag is $(VERSION)."; \
+	    echo "WARN: the tag should name the commit it was built from: git -C $(SRC) checkout $(VERSION), or push VERSION=$$head and bump the manifest."; \
+	    read -rp "Push anyway? [y/N] " a; [[ "$$a" == y ]] || exit 1; \
+	  fi
+	@acct=$$(aws sts get-caller-identity --query Account --output text) || exit 1; \
+	  reg="$$acct.dkr.ecr.$(REGION).amazonaws.com"; img="$$reg/$(ADAPTER_REPO):$(VERSION)"; \
+	  aws ecr get-login-password --region $(REGION) | docker login --username AWS --password-stdin "$$reg" >/dev/null || exit 1; \
+	  trap 'docker logout "'"$$reg"'" >/dev/null 2>&1' EXIT; \
+	  docker build --platform linux/amd64 -f "$(SRC)/scripts/openai_adapter/Dockerfile" -t "$$img" "$(SRC)/scripts" && \
+	  docker push "$$img" && \
+	  echo "OK: pushed $(ADAPTER_REPO):$(VERSION). The manifest pins $(VERSION); Argo will pull it at the next sync."
+
+adapter-version: ## Phase 2b: print the adapter tag pinned in git (= the framework commit to build)
+	@echo $(VERSION)
+
+adapter-images: ## Phase 2b: list the adapter image tags in ECR (newest first) and the tag the manifest pins
+	@aws ecr describe-images --region $(REGION) --repository-name $(ADAPTER_REPO) \
+	  --query 'sort_by(imageDetails,&imagePushedAt)[::-1].[imageTags[0],imagePushedAt,imageSizeInBytes]' --output table
+	@echo "Manifest pins: $(VERSION)"
 
 # --- Permanent, account-level resources (tofu-account/). NOT torn down. ------
 

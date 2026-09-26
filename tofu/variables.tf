@@ -189,3 +189,14 @@ variable "alb_allowed_cidrs" {
     error_message = "Refusing 0.0.0.0/0: the sandbox ALB is reachable from the internet and its backends have no auth."
   }
 }
+
+variable "adapter_repository" {
+  description = <<-EOT
+    ECR repository name for the m5stack-adapter image (phase 2b). Created by
+    tofu-account/ecr.tf, which has the same default - keep the two equal.
+    The full address (with the account ID) is built in tofu/argocd.tf and
+    never written to git.
+  EOT
+  type        = string
+  default     = "lab-sandbox/m5stack-adapter"
+}
