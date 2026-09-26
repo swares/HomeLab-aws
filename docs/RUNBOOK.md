@@ -478,6 +478,12 @@ the adapter's OpenAI translation, and the device protocol. Only the hardware is
 missing. The adapter's `x_route_taken` is `stub-<slug>`, so a stub answer can't
 be mistaken for a real device.
 
+**Verified live 2026-09-25:** through the ALB, `m5-llm` replied
+`stub device (llm): received a 50-character prompt.` (`m5stack-llm`) and `m5`
+replied `stub device (route): ...` (`m5stack-route`); both pods were Running.
+The 02:00 teardown deleted the `m5stack` app with the rest, found no load
+balancers or ELB interfaces left, and destroyed 36 resources.
+
 | Symptom | Cause |
 |---|---|
 | adapter pod `ImagePullBackOff`, image `…amazonaws.com/lab-sandbox/m5stack-adapter:<tag>` | That tag was never pushed. `make adapter-images`, then `make adapter-push SRC=…` for the pinned tag |
