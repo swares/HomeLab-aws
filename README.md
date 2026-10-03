@@ -1,13 +1,92 @@
 # HomeLab-aws — ephemeral EKS sandbox
 
-A deliberately detachable AWS training environment, separate from
-[swares/HomeLab](https://github.com/swares/HomeLab). An EKS cluster is built on
-demand, bootstraps its own Argo CD, runs a small GitOps tree, and is destroyed
-nightly.
+An Amazon EKS cluster that is built from nothing with OpenTofu, bootstraps its
+own Argo CD, serves an AI gateway through an internet-facing ALB, and is
+**destroyed every night at 02:00** by a scoped, least-privilege teardown job.
+A full session costs about **$1**. Left running, the same cluster would cost
+about **$85 a month**.
 
-**The lab has a zero-line diff from this repo.** Nothing here touches the k3s
-cluster, the lab's Argo CD, Vault, or the NAS. Deleting this repo and running
-one `tofu destroy` leaves no trace on either side.
+It is the cloud counterpart to [swares/HomeLab](https://github.com/swares/HomeLab),
+a 14-host on-prem GitOps platform, and is deliberately detachable from it.
+Nothing here touches the lab's k3s cluster, Argo CD, Vault, or NAS. Deleting
+this repo and running one teardown leaves no trace on either side.
+
+> **Read the story:** [docs/CASE-STUDY.md](docs/CASE-STUDY.md) covers the
+> design decisions, what broke, and what I'd do differently.
+
+## What this demonstrates
+
+| Skill | Where to look |
+|---|---|
+| **EKS from zero with OpenTofu.** VPC, IAM, managed node group on spot, and add-ons, with S3 remote state that stays reachable even if the home lab is down | `tofu/` |
+| **Workload identity (IRSA), no static AWS keys.** Pods assume IAM roles through the cluster's OIDC provider, with trust policies pinned by `sub` and `aud`. `make irsa-check` proves the pod holds a token path and a role ARN, and no key of any kind | `tofu/litellm.tf`, `tofu/alb-controller.tf` |
+| **Self-bootstrapping GitOps.** Tofu installs Argo CD, Argo installs everything else from this public repo (app-of-apps, sync waves, `selfHeal` and `prune`) | `tofu/argocd.tf`, `gitops/` |
+| **Policy as code.** Kyverno in Enforce mode: no `:latest` tags, no privileged pods, resource limits required | `gitops/workloads/kyverno/` |
+| **Controller-created infrastructure, cleaned up correctly.** The AWS Load Balancer Controller creates ALBs that Tofu never sees. Teardown deletes the Ingresses, waits until AWS has released the load balancers *and their ENIs*, then destroys, and it fails closed | `scripts/eks-teardown.sh` |
+| **FinOps guardrails.** No NAT Gateway, spot nodes, nightly teardown on a systemd timer, an AWS Budget kept in a separate module that is never destroyed, and `upgrade_policy = STANDARD` to avoid 6× extended-support pricing | `tofu-account/`, `systemd/` |
+| **Least privilege and secret hygiene.** The teardown identity can only delete what `tofu/` creates. Per-cluster secrets live and die with the cluster, and issued credentials never touch Tofu state, git, or disk. The home IP that gates the ALB stays out of this public repo | `tofu-account/teardown-user.tf`, `CLAUDE.md` |
+| **Break-glass planning.** A lockout is treated as a billing event, and a printed recovery envelope starts with "stop the charges" | `docs/BREAK-GLASS.md` |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    DEV["make eks-up<br/>(OpenTofu)"] --> TF
+    subgraph TF["tofu/ — rebuilt every session"]
+      direction TB
+      VPC["VPC · public subnets<br/>no NAT Gateway"]
+      EKS["EKS 1.35<br/>2× t3.medium spot"]
+      IAM["IAM roles for IRSA<br/>lab-sandbox-*"]
+    end
+    TF -->|helm| ARGO["Argo CD<br/>(in-cluster)"]
+    GH[("github.com/swares/HomeLab-aws<br/>gitops/")] -->|anonymous pull| ARGO
+    ARGO --> KYV["Kyverno<br/>3 policies, Enforce"]
+    ARGO --> LLM["LiteLLM gateway"]
+    ARGO --> M5["m5stack-adapter + stub<br/>(image from ECR)"]
+    USER["Allowed CIDR only"] -->|"/v1 + master key"| ALB["ALB<br/>(created by LB Controller)"]
+    ALB --> LLM
+    LLM -->|IRSA| BR["Amazon Bedrock<br/>Claude Haiku 4.5"]
+    LLM -.->|fallback| ANT["Anthropic API"]
+    LLM --> M5
+
+    subgraph ACCT["tofu-account/ — permanent"]
+      direction TB
+      BUD["AWS Budget alarm"]
+      TDU["lab-teardown IAM user<br/>(scoped)"]
+      ECR["ECR repository"]
+    end
+    TIMER["02:00 systemd timer<br/>on a lab host"] -->|as lab-teardown| TD["eks-teardown.sh<br/>delete Ingress → wait for ALB + ENIs → destroy"]
+    TD --> TF
+
+    classDef perm fill:#0c1a2e,stroke:#3b82f6,color:#e6edf3;
+    classDef eph fill:#1a1113,stroke:#ff4d4d,color:#e6edf3;
+    classDef ctl fill:#15111f,stroke:#a78bfa,color:#e6edf3;
+    class BUD,TDU,ECR perm;
+    class VPC,EKS,IAM eph;
+    class ARGO,TIMER,TD,DEV ctl;
+```
+
+Red is rebuilt and destroyed every session. Blue is permanent and deliberately
+outside the nightly destroy. A backstop destroyed alongside the thing it
+watches is not a backstop.
+
+## Results
+
+| Phase | What was proven | Status |
+|---|---|---|
+| 0 | Create/destroy loop, self-bootstrapping Argo CD, Kyverno baseline, nightly teardown timer | Done |
+| 1 | LiteLLM → Bedrock through IRSA, end to end, with no static AWS keys | Done. IRSA proven. Bedrock is blocked account-wide by AWS (support case open), so Claude is served through the direct-API fallback, verified 2026-09-23 |
+| 2 | AWS Load Balancer Controller, and an ordered teardown with a **live ALB** that leaves nothing behind | Done, verified 2026-09-25 |
+| 2a | LiteLLM behind the ALB: `/v1` only, per-cluster master key, source-CIDR restricted | Done, verified live 2026-09-25 |
+| 2b | Edge-device adapter, built from [My_M5Stack_Core_Framework](https://github.com/swares/My_M5Stack_Core_Framework) and pulled from ECR, served behind LiteLLM | Done, verified live 2026-09-25 |
+| 3 | Karpenter with GPU spot nodes, Whisper batch transcription | Not started |
+
+Known gaps are listed honestly: the break-glass envelope isn't filled in yet
+and its drill hasn't run (BACKLOG 1.4, 1.5).
+
+---
+
+*Everything below is the operator documentation.*
 
 ## Why it is shaped this way
 
@@ -40,6 +119,7 @@ one `tofu destroy` leaves no trace on either side.
 | `gitops/bootstrap/` | Reference copy of the root Application (the live one is in `tofu/argocd.tf`) |
 | `scripts/` | `eks-teardown.sh` (ordered teardown), `install-teardown-timer.sh` (sets up the 02:00 timer on n150-2), `print-aws-envelope.sh`, `backlog-audit.py` (vendored from the lab) |
 | `systemd/` | Nightly teardown timer (runs on `n150-2`) |
+| `docs/CASE-STUDY.md` | The write-up: why it's built this way, what broke, lessons |
 | `docs/BREAK-GLASS.md` | AWS lockout envelope — prompted, printed, stored off-site |
 | `BACKLOG.md` | Open work **outside** the roadmap: account issues, AWS requests, hygiene. `make backlog` audits it |
 | `CLAUDE.md` | Operating rules — read before touching anything |
