@@ -23,7 +23,7 @@ because this file starts clean and should stay that way.
 
 ## 1. Account access and billing
 
-### 1.1 Bedrock is blocked for the whole account (Error 002) — **waiting on AWS**
+### 1.1 Bedrock is blocked for the whole account (Error 002) — **waiting on AWS since 2026-10-01**
 
 Every Bedrock call fails with `ValidationException: Error 002: Access to
 Bedrock models is not allowed for this account`. That holds for every model,
@@ -31,6 +31,18 @@ including Amazon Nova Micro, and for every identity, including root. First seen
 2026-09-22 after the card on the account expired; still present 2026-09-23.
 This is separate from the quota denial in 2.1. Raised as a reply on support
 case 179010504900511 on 2026-09-23.
+
+**Case history.** AWS has twice said the block was gone when it wasn't, so a
+reply on the case is not the fix; the `converse` call below is.
+
+| Date | AWS said | Checked |
+|---|---|---|
+| 2026-09-24 | "Most Bedrock models" are available; Haiku 4.5 goes through a service team | Error 002 still on every model |
+| 2026-09-30 | Request re-raised with the service team, under review | — |
+| 2026-10-01 08:59 UTC | Account-level restriction removed; Nova Micro and Haiku 4.5 should both work | 15:40 UTC, as root: **both still Error 002**. Request ID `c1b79b8a-e2e2-457d-80cd-7cff384f4bcd`, sent to the case the same day |
+
+No reply from AWS since 2026-10-01. When one comes, rerun the Haiku
+`converse` call before changing anything else here.
 
 Until it clears, `claude-haiku` is served only by the direct-API fallback, so
 all Claude spend is on the Anthropic account (see 1.3).
