@@ -113,19 +113,18 @@ Makefile and `scripts/eks-teardown.sh` run whatever `KUBECTL` names, so an
 upstream kubectl beside the wrapper fixes it without touching the lab:
 
 ```bash
-v=$(curl -fsSL https://dl.k8s.io/release/stable-1.35.txt)      # match the cluster's minor version
-curl -fsSLO "https://dl.k8s.io/release/$v/bin/linux/amd64/kubectl"
-curl -fsSLO "https://dl.k8s.io/release/$v/bin/linux/amd64/kubectl.sha256"
-echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check      # must print: kubectl: OK
-install -m 0755 kubectl ~/.local/bin/kubectl-upstream && rm kubectl kubectl.sha256
-echo 'export KUBECTL=$HOME/.local/bin/kubectl-upstream' >> ~/.bashrc
+make kubectl-upstream          # reads cluster_version, verifies the sha256, installs ~/.local/bin/kubectl-upstream
+echo 'export KUBECTL=$HOME/.local/bin/kubectl-upstream' >> ~/.bashrc   # once; then open a new shell
+"$KUBECTL" version --client     # no cluster needed; compare with plain `kubectl version --client`
+make litellm-auth-check        # next session with a cluster: no `permission denied` lines
 ```
 
 Plain `kubectl` still means the lab's k3s. The name `kubectl-upstream` is
 deliberate: a binary called `kubectl` earlier in `PATH` would silently replace
-the wrapper for the lab too. When the cluster version moves, re-run with the
-new minor version. The timer is unaffected: it runs as `eks-teardown`, which
-never reads your `~/.bashrc`, so it keeps using plain `kubectl` as before.
+the wrapper for the lab too. When `cluster_version` moves, re-run
+`make kubectl-upstream`; it picks up the new minor version itself. The timer
+is unaffected: it runs as `eks-teardown`, which never reads your `~/.bashrc`,
+so it keeps using plain `kubectl` as before.
 
 ## Teardown timer
 
@@ -254,7 +253,7 @@ a Kubernetes-issued token, and no AWS key of any kind.
 | Smoke test: `AccessDeniedException ... not authorized to perform: sts:AssumeRoleWithWebIdentity` | Trust policy `sub`/`aud` doesn't match the SA, or the OIDC provider is missing. `tofu/litellm.tf` |
 | Smoke test: `AccessDeniedException ... bedrock:InvokeModel` on a **foundation-model ARN in another region** | The inference profile routed the call to a region the policy doesn't list. Add it to `bedrock_profile_dest_regns` |
 | Smoke test: mentions the use-case form or Marketplace | Prerequisite 1 or 2 hasn't been done |
-| Any Bedrock call, from **any** identity and **any** model (including Amazon Nova), fails `ValidationException: Error 002: Access to Bedrock models is not allowed for this account` | Not IAM and not model access - the whole account is restricted. Seen 2026-09-22 after a credit card on the account expired. Fix the payment method in the Billing console; if that doesn't clear it within a day, open a free **Account and billing** support case. **Still present 2026-09-23** - every model including Nova, as root - after a quota request on the same account was denied; raised on support case 179010504900511. While it lasts, `claude-haiku` is served only by the direct-API fallback. `aws freetier get-account-plan-state` returning `FREE` instead means the account needs upgrading to the paid plan |
+| Any Bedrock call, from **any** identity and **any** model (including Amazon Nova), fails `ValidationException: Error 002: Access to Bedrock models is not allowed for this account` | Not IAM and not model access - the whole account is restricted. Seen 2026-09-22 after a credit card on the account expired. Fix the payment method in the Billing console; if that doesn't clear it within a day, open a free **Account and billing** support case. **Still present 2026-10-01** - every model including Nova, as root - even after AWS said on the case that the restriction was removed (they said so on 09-24 and again on 10-01; history in BACKLOG 1.1). Raised on support case 179010504900511. Don't trust a "fixed" reply until the `converse` call returns text. While it lasts, `claude-haiku` is served only by the direct-API fallback. `aws freetier get-account-plan-state` returning `FREE` instead means the account needs upgrading to the paid plan |
 
 ### Direct-API fallback (while the Bedrock quota is low)
 

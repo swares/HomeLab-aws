@@ -1,7 +1,7 @@
 # Convenience targets for the EKS sandbox. Mirrors the conventions in
 # swares/HomeLab: `make help` greps the ## comments.
 .PHONY: help init plan eks-up eks-down eks-status eks-kubeconfig eks-env argocd-ui litellm-wait litellm-smoke litellm-url litellm-master-key litellm-auth-check litellm-key fallback-check irsa-check alb-check cost fmt validate \
-        account-init account-plan account-apply backlog adapter-push adapter-images adapter-version
+        account-init account-plan account-apply backlog adapter-push adapter-images adapter-version kubectl-upstream
 
 # Recipes use bash features ([[ ]]); /bin/sh on Debian is dash.
 SHELL     := /bin/bash
@@ -24,7 +24,12 @@ EKS_KUBECONFIG ?= $(HOME)/.kube/eks-sandbox
 #   export KUBECTL=$HOME/.local/bin/kubectl-upstream
 # Upstream kubectl must be within one minor version of the cluster (EKS 1.35:
 # 1.34-1.36). The default stays `kubectl`, so nothing changes until you set it.
+# `make kubectl-upstream` installs one matched to cluster_version.
 KUBECTL ?= kubectl
+KUBECTL_UPSTREAM ?= $(HOME)/.local/bin/kubectl-upstream
+# The cluster's minor version, read from the variable's default so the
+# install can't drift from what eks-up builds.
+K8S_MINOR = $(shell awk '/variable "cluster_version"/{f=1} f && /^ *default/{gsub(/"/,"",$$3); print $$3; exit}' $(TOFU_DIR)/variables.tf)
 
 # Argo CD creates the litellm Deployment a few minutes after `eks-up` returns
 # (root app -> litellm app -> manifests). The phase-1 targets wait rather than
@@ -235,6 +240,24 @@ cost:        ## Month-to-date spend
 		--time-period Start=$$(date -u +%Y-%m-01),End=$$(date -u +%Y-%m-%d) \
 		--granularity MONTHLY --metrics UnblendedCost \
 		--query 'ResultsByTime[0].Total.UnblendedCost.Amount' --output text
+
+kubectl-upstream: ## Install upstream kubectl matching cluster_version as ~/.local/bin/kubectl-upstream (BACKLOG 3.4)
+	@set -euo pipefail; \
+	  [[ "$(K8S_MINOR)" =~ ^1\.[0-9]+$$ ]] || { echo "FAIL: could not read cluster_version from $(TOFU_DIR)/variables.tf (got '$(K8S_MINOR)')"; exit 1; }; \
+	  case "$$(uname -m)" in x86_64) arch=amd64;; aarch64|arm64) arch=arm64;; *) echo "FAIL: no upstream kubectl for $$(uname -m)"; exit 1;; esac; \
+	  v=$$(curl --proto '=https' -fsSL "https://dl.k8s.io/release/stable-$(K8S_MINOR).txt"); \
+	  [[ "$$v" =~ ^v$(subst .,\.,$(K8S_MINOR))\.[0-9]+$$ ]] || { echo "FAIL: unexpected release string '$$v'"; exit 1; }; \
+	  tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	  curl --proto '=https' -fsSL -o "$$tmp/kubectl" "https://dl.k8s.io/release/$$v/bin/linux/$$arch/kubectl"; \
+	  curl --proto '=https' -fsSL -o "$$tmp/kubectl.sha256" "https://dl.k8s.io/release/$$v/bin/linux/$$arch/kubectl.sha256"; \
+	  echo "$$(cat "$$tmp/kubectl.sha256")  $$tmp/kubectl" | sha256sum --check --quiet; \
+	  mkdir -p "$$(dirname "$(KUBECTL_UPSTREAM)")"; \
+	  install -m 0755 "$$tmp/kubectl" "$(KUBECTL_UPSTREAM)"; \
+	  echo "Installed $$("$(KUBECTL_UPSTREAM)" version --client -o json | sed -n 's/.*"gitVersion": *"\([^"]*\)".*/\1/p' | head -1) ($$arch) at $(KUBECTL_UPSTREAM)"; \
+	  if [[ "$${KUBECTL:-}" != "$(KUBECTL_UPSTREAM)" ]]; then \
+	    echo "Not in use yet. Add to ~/.bashrc, then open a new shell:"; \
+	    echo "  export KUBECTL=$(KUBECTL_UPSTREAM)"; \
+	  fi
 
 backlog:     ## Audit BACKLOG.md bookkeeping (no untrackable items, no open boxes under a DONE heading)
 	python3 scripts/backlog-audit.py --strict --max-orphans 0
