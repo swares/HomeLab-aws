@@ -199,7 +199,8 @@ mostly warnings.
 
 - [x] Decide: a standalone `kubectl` for the sandbox (`KUBECTL ?=` in the Makefile), or accept the noise → standalone, opt-in (2026-09-26)
 - [x] Makefile and `eks-teardown.sh` run `$(KUBECTL)` / `$KUBECTL`, defaulting to `kubectl`; RUNBOOK → Daily use has the install
-- [ ] Upstream kubectl installed on n150-2 as `~/.local/bin/kubectl-upstream`, `KUBECTL` exported, and a `make` target runs without the warnings
+- [x] `make kubectl-upstream` installs it, matched to `cluster_version` and checksum-verified (2026-10-12)
+- [ ] Run on n150-2, `KUBECTL` exported, and a `make` target runs without the warnings
 
 ### 3.5 The LiteLLM ALB is HTTP only, so the master key crosses the internet in cleartext — **accepted for now**
 

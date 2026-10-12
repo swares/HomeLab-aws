@@ -113,19 +113,18 @@ Makefile and `scripts/eks-teardown.sh` run whatever `KUBECTL` names, so an
 upstream kubectl beside the wrapper fixes it without touching the lab:
 
 ```bash
-v=$(curl -fsSL https://dl.k8s.io/release/stable-1.35.txt)      # match the cluster's minor version
-curl -fsSLO "https://dl.k8s.io/release/$v/bin/linux/amd64/kubectl"
-curl -fsSLO "https://dl.k8s.io/release/$v/bin/linux/amd64/kubectl.sha256"
-echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check      # must print: kubectl: OK
-install -m 0755 kubectl ~/.local/bin/kubectl-upstream && rm kubectl kubectl.sha256
-echo 'export KUBECTL=$HOME/.local/bin/kubectl-upstream' >> ~/.bashrc
+make kubectl-upstream          # reads cluster_version, verifies the sha256, installs ~/.local/bin/kubectl-upstream
+echo 'export KUBECTL=$HOME/.local/bin/kubectl-upstream' >> ~/.bashrc   # once; then open a new shell
+"$KUBECTL" version --client     # no cluster needed; compare with plain `kubectl version --client`
+make litellm-auth-check        # next session with a cluster: no `permission denied` lines
 ```
 
 Plain `kubectl` still means the lab's k3s. The name `kubectl-upstream` is
 deliberate: a binary called `kubectl` earlier in `PATH` would silently replace
-the wrapper for the lab too. When the cluster version moves, re-run with the
-new minor version. The timer is unaffected: it runs as `eks-teardown`, which
-never reads your `~/.bashrc`, so it keeps using plain `kubectl` as before.
+the wrapper for the lab too. When `cluster_version` moves, re-run
+`make kubectl-upstream`; it picks up the new minor version itself. The timer
+is unaffected: it runs as `eks-teardown`, which never reads your `~/.bashrc`,
+so it keeps using plain `kubectl` as before.
 
 ## Teardown timer
 
