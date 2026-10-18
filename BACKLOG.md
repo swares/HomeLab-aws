@@ -23,7 +23,7 @@ because this file starts clean and should stay that way.
 
 ## 1. Account access and billing
 
-### 1.1 Bedrock is blocked for the whole account (Error 002) — **waiting on AWS since 2026-10-01**
+### 1.1 Bedrock is blocked for the whole account (Error 002) — **cleared 2026-10-18; in-cluster check pending**
 
 Every Bedrock call fails with `ValidationException: Error 002: Access to
 Bedrock models is not allowed for this account`. That holds for every model,
@@ -40,17 +40,19 @@ reply on the case is not the fix; the `converse` call below is.
 | 2026-09-24 | "Most Bedrock models" are available; Haiku 4.5 goes through a service team | Error 002 still on every model |
 | 2026-09-30 | Request re-raised with the service team, under review | — |
 | 2026-10-01 08:59 UTC | Account-level restriction removed; Nova Micro and Haiku 4.5 should both work | 15:40 UTC, as root: **both still Error 002**. Request ID `c1b79b8a-e2e2-457d-80cd-7cff384f4bcd`, sent to the case the same day |
+| 2026-10-18 | Quota increase **denied** for lack of usage history (see 2.1); "other models should have their default quota available" | ~22:00 UTC, as root: **Nova Micro and Haiku 4.5 both answer**. Error 002 is gone |
 
-No reply from AWS since 2026-10-01. When one comes, rerun the Haiku
-`converse` call before changing anything else here.
+When exactly it cleared is unknown: some time between 10-01 15:40 UTC and
+10-18. The reply that came with it was about the quota, not the block.
 
-Until it clears, `claude-haiku` is served only by the direct-API fallback, so
-all Claude spend is on the Anthropic account (see 1.3).
+What's left is the pod's path: IRSA → Bedrock from inside the cluster. That
+needs `eks-up`, which waits on n150-2 (3.6). Until it's run, the fallback
+stays in place.
 
-- [ ] AWS replies on the case, and the answer is recorded here
-- [ ] As admin, the RUNBOOK phase-1 `converse` call returns text
+- [x] AWS replies on the case, and the answer is recorded here (2026-10-18)
+- [x] As admin, the RUNBOOK phase-1 `converse` call returns text (2026-10-18, Haiku 4.5 and Nova Micro)
 - [ ] `make litellm-smoke` reports `bedrock-haiku` with no fallback attempted
-- [ ] RUNBOOK Error 002 row and README phase-1 status updated to say it cleared
+- [x] RUNBOOK Error 002 row and README phase-1 status updated to say it cleared (2026-10-18)
 
 ### 1.2 Day-to-day CLI work runs as the root user — **plan written, decisions open**
 
@@ -118,14 +120,21 @@ for the new identity.
 
 ## 2. Requests to AWS with lead time
 
-### 2.1 Resubmit the Bedrock quota request for Haiku 4.5 — **after the October bill**
+### 2.1 Resubmit the Bedrock quota request for Haiku 4.5 — **denied twice; build usage, then after the October bill**
 
 Denied 2026-09-23 on case 179010504900511 for lack of usage history ("continue
-using the other accessible models", "wait for the next billing cycle"). That
-advice cannot be followed while 1.1 blocks every model, so this is gated on 1.1.
-A reminder fires on 2026-11-03.
+using the other accessible models", "wait for the next billing cycle"). Denied
+again 2026-10-18 on the same case, same reason: the account is new with
+minimal usage. Their advice: use the **default quota** that is now available,
+keep usage steady and inexpensive, and resubmit after the next billing cycle.
+They also suggested AWS Sales; not worth it for a personal learning account.
 
-- [ ] 1.1 cleared, so the account can actually build Bedrock usage
+With 1.1 cleared, that advice can finally be followed. Default quotas work
+now, so steady, cheap Bedrock use from here to the resubmission is what
+makes it stronger. A reminder fires on 2026-11-03.
+
+- [x] 1.1 cleared, so the account can actually build Bedrock usage (2026-10-18)
+- [ ] Decide how to build usage: occasional CLI `converse` calls, or Bedrock as LiteLLM's normal path once the in-cluster check passes
 - [ ] October bill closed
 - [ ] Resubmitted: one model, a modest tokens-per-minute increase, citing usage since September
 
