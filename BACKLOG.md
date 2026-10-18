@@ -134,7 +134,7 @@ now, so steady, cheap Bedrock use from here to the resubmission is what
 makes it stronger. A reminder fires on 2026-11-03.
 
 - [x] 1.1 cleared, so the account can actually build Bedrock usage (2026-10-18)
-- [ ] Decide how to build usage: occasional CLI `converse` calls, or Bedrock as LiteLLM's normal path once the in-cluster check passes
+- [x] Decide how to build usage → **both** (2026-10-18): occasional admin CLI `converse` calls to Haiku 4.5 starting now (RUNBOOK phase 1 → step 2's command), and Bedrock as LiteLLM's normal path for `claude-haiku` once the in-cluster check passes (1.1)
 - [ ] October bill closed
 - [ ] Resubmitted: one model, a modest tokens-per-minute increase, citing usage since September
 
